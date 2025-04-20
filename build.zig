@@ -10,10 +10,16 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .link_libcpp = true,
     });
-    if (b.lazyDependency("zimq", .{})) |zimq| {
+    if (b.lazyDependency("zimq", .{
+        .target = target,
+        .optimize = optimize,
+    })) |zimq| {
         zincom.addImport("zimq", zimq.module("zimq"));
     }
-    if (b.lazyDependency("mzg", .{})) |zimq| {
+    if (b.lazyDependency("mzg", .{
+        .target = target,
+        .optimize = optimize,
+    })) |zimq| {
         zincom.addImport("mzg", zimq.module("mzg"));
     }
 
@@ -22,7 +28,6 @@ pub fn build(b: *std.Build) void {
         .name = "zincom",
         .root_module = zincom,
     });
-
     b.installArtifact(lib);
 
     const lib_unit_tests = b.addTest(.{
