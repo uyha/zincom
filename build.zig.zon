@@ -1,0 +1,21 @@
+.{
+    .name = .zincom,
+    .version = "0.0.0",
+    .fingerprint = 0xcf5705fcfd82342e, // Changing this has security and trust implications.
+    .minimum_zig_version = "0.14.0",
+    .dependencies = .{
+        .zimq = .{
+            .url = "git+https://github.com/uyha/zimq.git#f82a9daeb92dc0b46257a7a187a6ac04d7cc0ab1",
+            .hash = "zimq-0.0.0-nw1ioNB1AQDqwOzxuUN1_0IKZNF0Mwe2CKFGax_zY4VG",
+        },
+        .mzg = .{
+            .url = "git+https://github.com/uyha/mzg.git?ref=v0.0.3#5ae217fe2bd1adda47dbfc147e1c86b17cf107f5",
+            .hash = "mzg-0.0.3-dgyD12ETAQD3jlON9FTGKQNCG0c0mdSkOLhO6nyOQJDJ",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}
