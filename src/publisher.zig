@@ -116,76 +116,76 @@ test Publisher {
     const context: *zimq.Context = try .init();
     defer context.deinit();
 
-    // var poller: *zimq.Poller = try .init();
-    // defer poller.deinit();
-    //
-    // const Data = struct { @"1": u8, @"2": u8 };
-    // const Event = StructAsTaggedUnion(Data);
-    // var source: Publisher(Data) = try .init(
-    //     context,
-    //     "inproc://#1",
-    //     .{ .@"1" = 0, .@"2" = 0 },
-    // );
-    // defer source.deinit(t.allocator);
-    //
-    // const noti: *zimq.Socket = try .init(context, .sub);
-    // defer noti.deinit();
-    // try noti.set(.subscribe, "");
-    // try noti.connect("inproc://#1/noti");
-    //
-    // const ping: *zimq.Socket = try .init(context, .push);
-    // defer ping.deinit();
-    // try ping.connect("inproc://#1/ping");
-    // try ping.sendSlice("", .{});
-    //
-    // try poller.add(source.ping, null, .in);
-    //
-    // var events: [4]zimq.Poller.Event = undefined;
-    // const len = try poller.wait_all(&events, -1);
-    // try t.expectEqual(1, len);
-    // try t.expectEqual(source.ping, events[0].socket);
-    // try source.handlePing(t.allocator);
-    //
-    // var message: zimq.Message = .empty();
-    // defer message.deinit();
-    //
-    // _ = try noti.recvMsg(&message, .{});
-    // try t.expectEqualStrings("ping", message.slice().?);
-    // try t.expect(message.more());
-    //
-    // _ = try noti.recvMsg(&message, .{});
-    // try t.expectEqualStrings("\x92\x00\x00", message.slice().?);
-    // try t.expect(!message.more());
-    //
-    // {
-    //     try source.set(.{ .@"1" = 1 }, t.allocator);
-    //
-    //     _ = try noti.recvMsg(&message, .{});
-    //     try t.expectEqualStrings("noti", message.slice().?);
-    //     try t.expect(message.more());
-    //
-    //     _ = try noti.recvMsg(&message, .{});
-    //     try t.expectEqualStrings("\x92\x00\x01", message.slice().?);
-    //     var event: Event = undefined;
-    //     _ = try mzg.unpack(message.slice().?, &event);
-    //     try t.expectEqual(Event{ .@"1" = 1 }, event);
-    //     try t.expect(!message.more());
-    // }
-    //
-    // {
-    //     try source.set(.{ .@"2" = 1 }, t.allocator);
-    //
-    //     _ = try noti.recvMsg(&message, .{});
-    //     try t.expectEqualStrings("noti", message.slice().?);
-    //     try t.expect(message.more());
-    //
-    //     _ = try noti.recvMsg(&message, .{});
-    //     try t.expectEqualStrings("\x92\x01\x01", message.slice().?);
-    //     var event: Event = undefined;
-    //     _ = try mzg.unpack(message.slice().?, &event);
-    //     try t.expectEqual(Event{ .@"2" = 1 }, event);
-    //     try t.expect(!message.more());
-    // }
+    var poller: *zimq.Poller = try .init();
+    defer poller.deinit();
+
+    const Data = struct { @"1": u8, @"2": u8 };
+    const Event = StructAsTaggedUnion(Data);
+    var source: Publisher(Data) = try .init(
+        context,
+        "inproc://#1",
+        .{ .@"1" = 0, .@"2" = 0 },
+    );
+    defer source.deinit(t.allocator);
+
+    const noti: *zimq.Socket = try .init(context, .sub);
+    defer noti.deinit();
+    try noti.set(.subscribe, "");
+    try noti.connect("inproc://#1/noti");
+
+    const ping: *zimq.Socket = try .init(context, .push);
+    defer ping.deinit();
+    try ping.connect("inproc://#1/ping");
+    try ping.sendSlice("", .{});
+
+    try poller.add(source.ping, null, .in);
+
+    var events: [4]zimq.Poller.Event = undefined;
+    const len = try poller.wait_all(&events, -1);
+    try t.expectEqual(1, len);
+    try t.expectEqual(source.ping, events[0].socket);
+    try source.handlePing(t.allocator);
+
+    var message: zimq.Message = .empty();
+    defer message.deinit();
+
+    _ = try noti.recvMsg(&message, .{});
+    try t.expectEqualStrings("ping", message.slice().?);
+    try t.expect(message.more());
+
+    _ = try noti.recvMsg(&message, .{});
+    try t.expectEqualStrings("\x92\x00\x00", message.slice().?);
+    try t.expect(!message.more());
+
+    {
+        try source.set(.{ .@"1" = 1 }, t.allocator);
+
+        _ = try noti.recvMsg(&message, .{});
+        try t.expectEqualStrings("noti", message.slice().?);
+        try t.expect(message.more());
+
+        _ = try noti.recvMsg(&message, .{});
+        try t.expectEqualStrings("\x92\x00\x01", message.slice().?);
+        var event: Event = undefined;
+        _ = try mzg.unpack(message.slice().?, &event);
+        try t.expectEqual(Event{ .@"1" = 1 }, event);
+        try t.expect(!message.more());
+    }
+
+    {
+        try source.set(.{ .@"2" = 1 }, t.allocator);
+
+        _ = try noti.recvMsg(&message, .{});
+        try t.expectEqualStrings("noti", message.slice().?);
+        try t.expect(message.more());
+
+        _ = try noti.recvMsg(&message, .{});
+        try t.expectEqualStrings("\x92\x01\x01", message.slice().?);
+        var event: Event = undefined;
+        _ = try mzg.unpack(message.slice().?, &event);
+        try t.expectEqual(Event{ .@"2" = 1 }, event);
+        try t.expect(!message.more());
+    }
 }
 
 const std = @import("std");
