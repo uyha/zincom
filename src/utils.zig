@@ -38,7 +38,10 @@ test consumeAll {
 }
 
 pub fn StructAsTaggedUnion(Data: type) type {
-    const info = @typeInfo(Data).@"struct";
+    const info = switch (@typeInfo(Data)) {
+        .optional => |info| @typeInfo(info.child).@"struct",
+        else => |info| info.@"struct",
+    };
     const tag_fields: [info.fields.len]std.builtin.Type.EnumField = blk: {
         var result: [info.fields.len]std.builtin.Type.EnumField = undefined;
 
