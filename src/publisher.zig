@@ -24,7 +24,11 @@ pub fn Publisher(comptime TData: type) type {
         pub const SendError = zimq.Socket.SendError || std.mem.Allocator.Error || mzg.PackError(std.ArrayListUnmanaged(u8).Writer);
         pub const PingError = SendError || zimq.Socket.RecvError;
 
-        pub fn init(context: *zimq.Context, prefix: []const u8, inital_data: Data) InitError!Self {
+        pub fn init(
+            context: *zimq.Context,
+            prefix: []const u8,
+            inital_data: Data,
+        ) InitError!Self {
             const result: Self = .{
                 .ping = try zimq.Socket.init(context, .pull),
                 .noti = try zimq.Socket.init(context, .@"pub"),
@@ -64,20 +68,36 @@ pub fn Publisher(comptime TData: type) type {
             try self.sendHeader(.ping);
             try self.sendBody(self.current, allocator);
         }
-        pub fn set(
+
+        pub fn setField(
             self: *Self,
-            event: Event,
+            field: Event,
             allocator: std.mem.Allocator,
         ) SendError!void {
-            switch (event) {
+            const current = switch (@typeInfo(Data)) {
+                .optional => if (self.current) |*current| current else return,
+                else => &self.current,
+            };
+            switch (field) {
                 inline else => |value, tag| {
-                    @field(self.current, @tagName(tag)) = value;
+                    @field(current, @tagName(tag)) = value;
                 },
             }
-
             try self.sendHeader(.noti);
-            try self.sendBody(event, allocator);
+            try self.sendBody(field, allocator);
         }
+
+        pub fn setCurrent(
+            self: *Self,
+            current: Data,
+            allocator: std.mem.Allocator,
+        ) SendError!void {
+            self.current = current;
+
+            try self.sendHeader(.ping);
+            try self.sendBody(self.current, allocator);
+        }
+
         pub fn notifyLive(self: *Self) zimq.Socket.SendError!void {
             try self.sendHeader(.live);
         }
@@ -120,13 +140,13 @@ test Publisher {
     defer poller.deinit();
 
     const Data = struct { @"1": u8, @"2": u8 };
-    const Event = StructAsTaggedUnion(Data);
-    var source: Publisher(Data) = try .init(
+    var source: Publisher(?Data) = try .init(
         context,
         "inproc://#1",
-        .{ .@"1" = 0, .@"2" = 0 },
+        null,
     );
     defer source.deinit(t.allocator);
+    const Event = @TypeOf(source).Event;
 
     const noti: *zimq.Socket = try .init(context, .sub);
     defer noti.deinit();
@@ -154,32 +174,45 @@ test Publisher {
     try t.expect(message.more());
 
     _ = try noti.recvMsg(&message, .{});
-    try t.expectEqualStrings("\x92\x00\x00", message.slice().?);
+    try t.expectEqualStrings("\xc0", message.slice().?);
     try t.expect(!message.more());
 
     {
-        try source.set(.{ .@"1" = 1 }, t.allocator);
+        // Since currently the data is null, no event will be sent
+        try source.setField(.{ .@"1" = 1 }, t.allocator);
 
-        _ = try noti.recvMsg(&message, .{});
-        try t.expectEqualStrings("noti", message.slice().?);
-        try t.expect(message.more());
-
-        _ = try noti.recvMsg(&message, .{});
-        try t.expectEqualStrings("\x92\x00\x01", message.slice().?);
-        var event: Event = undefined;
-        _ = try mzg.unpack(message.slice().?, &event);
-        try t.expectEqual(Event{ .@"1" = 1 }, event);
-        try t.expect(!message.more());
+        try t.expectError(
+            error.WouldBlock,
+            noti.recvMsg(&message, .noblock),
+        );
     }
 
     {
-        try source.set(.{ .@"2" = 1 }, t.allocator);
+        try source.setCurrent(
+            .{ .@"1" = 1, .@"2" = 2 },
+            t.allocator,
+        );
 
-        _ = try noti.recvMsg(&message, .{});
+        var received = try noti.recvMsg(&message, .noblock);
+        try t.expectEqual(4, received);
+        try t.expectEqualStrings("ping", message.slice().?);
+        try t.expect(message.more());
+
+        received = try noti.recvMsg(&message, .noblock);
+        try t.expectEqual(3, received);
+        try t.expectEqualStrings("\x92\x01\x02", message.slice().?);
+    }
+
+    {
+        try source.setField(.{ .@"2" = 1 }, t.allocator);
+
+        var received = try noti.recvMsg(&message, .noblock);
+        try t.expectEqual(4, received);
         try t.expectEqualStrings("noti", message.slice().?);
         try t.expect(message.more());
 
-        _ = try noti.recvMsg(&message, .{});
+        received = try noti.recvMsg(&message, .noblock);
+        try t.expectEqual(3, received);
         try t.expectEqualStrings("\x92\x01\x01", message.slice().?);
         var event: Event = undefined;
         _ = try mzg.unpack(message.slice().?, &event);
