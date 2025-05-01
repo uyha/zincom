@@ -1,10 +1,3 @@
-const zincom = @import("root.zig");
-
-const consumeAll = zincom.consumeAll;
-const StructAsTaggedUnion = zincom.StructAsTaggedUnion;
-
-const Header = zincom.Header;
-
 pub fn Source(comptime TData: type) type {
     return struct {
         const Self = @This();
@@ -59,7 +52,7 @@ pub fn Source(comptime TData: type) type {
             self.buffer.deinit(allocator);
         }
 
-        pub fn handlePing(
+        pub fn processPing(
             self: *Self,
             allocator: std.mem.Allocator,
         ) PingError!void {
@@ -133,6 +126,7 @@ pub fn Source(comptime TData: type) type {
 }
 
 test Source {
+    const t = std.testing;
     const context: *zimq.Context = try .init();
     defer context.deinit();
 
@@ -164,7 +158,7 @@ test Source {
     const len = try poller.wait_all(&events, -1);
     try t.expectEqual(1, len);
     try t.expectEqual(source.ping, events[0].socket);
-    try source.handlePing(t.allocator);
+    try source.processPing(t.allocator);
 
     var message: zimq.Message = .empty();
     defer message.deinit();
@@ -222,6 +216,11 @@ test Source {
 }
 
 const std = @import("std");
-const t = std.testing;
 const zimq = @import("zimq");
 const mzg = @import("mzg");
+const zincom = @import("root.zig");
+
+const consumeAll = zincom.consumeAll;
+const StructAsTaggedUnion = zincom.StructAsTaggedUnion;
+
+const Header = zincom.Header;
