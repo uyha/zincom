@@ -91,13 +91,6 @@ pub fn Source(comptime TData: type) type {
             try self.sendBody(self.current, allocator);
         }
 
-        pub fn notifyLive(self: *Self) zimq.Socket.SendError!void {
-            try self.sendHeader(.live);
-        }
-        pub fn notifyDown(self: *Self) zimq.Socket.SendError!void {
-            try self.sendHeader(.down);
-        }
-
         inline fn sendHeader(
             self: *Self,
             header: Header,

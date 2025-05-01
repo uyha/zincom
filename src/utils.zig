@@ -79,6 +79,13 @@ pub fn StructAsTaggedUnion(Data: type) type {
     return @Type(.{ .@"union" = event });
 }
 
+pub fn AsOptional(Data: type) type {
+    return switch (@typeInfo(Data)) {
+        .optional => Data,
+        else => ?Data,
+    };
+}
+
 const std = @import("std");
 const t = std.testing;
 const zimq = @import("zimq");
