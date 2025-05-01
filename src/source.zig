@@ -5,7 +5,7 @@ const StructAsTaggedUnion = zincom.StructAsTaggedUnion;
 
 const Header = zincom.Header;
 
-pub fn Publisher(comptime TData: type) type {
+pub fn Source(comptime TData: type) type {
     return struct {
         const Self = @This();
 
@@ -132,7 +132,7 @@ pub fn Publisher(comptime TData: type) type {
     };
 }
 
-test Publisher {
+test Source {
     const context: *zimq.Context = try .init();
     defer context.deinit();
 
@@ -140,7 +140,7 @@ test Publisher {
     defer poller.deinit();
 
     const Data = struct { a: u8, @"1": u8, @"2": u8 };
-    var source: Publisher(?Data) = try .init(
+    var source: Source(?Data) = try .init(
         context,
         "inproc://#1",
         null,
