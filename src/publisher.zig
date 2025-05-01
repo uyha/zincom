@@ -139,7 +139,7 @@ test Publisher {
     var poller: *zimq.Poller = try .init();
     defer poller.deinit();
 
-    const Data = struct { @"1": u8, @"2": u8 };
+    const Data = struct { a: u8, @"1": u8, @"2": u8 };
     var source: Publisher(?Data) = try .init(
         context,
         "inproc://#1",
@@ -189,7 +189,7 @@ test Publisher {
 
     {
         try source.setCurrent(
-            .{ .@"1" = 1, .@"2" = 2 },
+            .{ .a = 3, .@"1" = 1, .@"2" = 2 },
             t.allocator,
         );
 
@@ -199,8 +199,8 @@ test Publisher {
         try t.expect(message.more());
 
         received = try noti.recvMsg(&message, .noblock);
-        try t.expectEqual(3, received);
-        try t.expectEqualStrings("\x92\x01\x02", message.slice().?);
+        try t.expectEqual(4, received);
+        try t.expectEqualStrings("\x93\x03\x01\x02", message.slice().?);
     }
 
     {
@@ -213,7 +213,7 @@ test Publisher {
 
         received = try noti.recvMsg(&message, .noblock);
         try t.expectEqual(3, received);
-        try t.expectEqualStrings("\x92\x01\x01", message.slice().?);
+        try t.expectEqualStrings("\x92\x02\x01", message.slice().?);
         var event: Event = undefined;
         _ = try mzg.unpack(message.slice().?, &event);
         try t.expectEqual(Event{ .@"2" = 1 }, event);
