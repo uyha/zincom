@@ -19,8 +19,8 @@ pub fn Sink(comptime TData: type) type {
 
         pub fn init(context: *zimq.Context, prefix: []const u8) InitError!Self {
             const result: Self = .{
-                .ping = try zimq.Socket.init(context, .push),
-                .noti = try zimq.Socket.init(context, .sub),
+                .ping = try .init(context, .push),
+                .noti = try .init(context, .sub),
                 .message = .empty(),
             };
 
