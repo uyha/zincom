@@ -56,7 +56,7 @@ pub fn Sink(comptime TData: type) type {
         pub fn process(self: *Self) ProcessError!void {
             _ = try self.noti.recvMsg(&self.message, .noblock);
 
-            const header = self.message.slice().?;
+            const header = self.message.slice();
 
             if (std.mem.eql(u8, "ping", header)) {
                 try self.processPing();
@@ -77,7 +77,7 @@ pub fn Sink(comptime TData: type) type {
             }
 
             _ = try self.noti.recvMsg(&self.message, .noblock);
-            _ = try mzg.unpack(self.message.slice().?, &self.current);
+            _ = try mzg.unpack(self.message.slice(), &self.current);
         }
 
         fn processNoti(self: *Self) ProcessError!void {
@@ -92,7 +92,7 @@ pub fn Sink(comptime TData: type) type {
 
                 while (consumed < received) {
                     consumed += try mzg.unpack(
-                        self.message.slice().?[consumed..],
+                        self.message.slice()[consumed..],
                         &event,
                     );
 

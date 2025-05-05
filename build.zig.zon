@@ -5,12 +5,12 @@
     .minimum_zig_version = "0.14.0",
     .dependencies = .{
         .zimq = .{
-            .url = "git+https://github.com/uyha/zimq.git#7dd81824c35fa366d265b30292f9b3e120f3a01c",
-            .hash = "zimq-0.0.0-nw1ioJeJAQBtgBHQ1Dzn2RXyTXLcJhdMDTOLS_Ckxbaz",
+            .url = "git+https://github.com/uyha/zimq.git#417fa59a412f232b491bcdb9d934afa3a623e430",
+            .hash = "zimq-0.0.0-nw1ioNiJAQDACt7j_iUlIXSoQJr8QFqiS8V8Xrm9E7iJ",
         },
         .mzg = .{
-            .url = "git+https://github.com/uyha/mzg.git?ref=v0.0.3#5ae217fe2bd1adda47dbfc147e1c86b17cf107f5",
-            .hash = "mzg-0.0.3-dgyD12ETAQD3jlON9FTGKQNCG0c0mdSkOLhO6nyOQJDJ",
+            .url = "git+https://github.com/uyha/mzg.git?ref=v0.0.5#75742b22c640a743bf8584f85e0f13746607eafa",
+            .hash = "mzg-0.0.5-dgyD11UnAQDTlBaOk_r94RHW4MWQS06dYAdva35sQV0p",
         },
     },
     .paths = .{

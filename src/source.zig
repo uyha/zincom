@@ -157,11 +157,11 @@ test Source {
     defer message.deinit();
 
     _ = try noti.recvMsg(&message, .{});
-    try t.expectEqualStrings("ping", message.slice().?);
+    try t.expectEqualStrings("ping", message.slice());
     try t.expect(message.more());
 
     _ = try noti.recvMsg(&message, .{});
-    try t.expectEqualStrings("\xc0", message.slice().?);
+    try t.expectEqualStrings("\xc0", message.slice());
     try t.expect(!message.more());
 
     {
@@ -182,12 +182,12 @@ test Source {
 
         var received = try noti.recvMsg(&message, .noblock);
         try t.expectEqual(4, received);
-        try t.expectEqualStrings("ping", message.slice().?);
+        try t.expectEqualStrings("ping", message.slice());
         try t.expect(message.more());
 
         received = try noti.recvMsg(&message, .noblock);
         try t.expectEqual(4, received);
-        try t.expectEqualStrings("\x93\x03\x01\x02", message.slice().?);
+        try t.expectEqualStrings("\x93\x03\x01\x02", message.slice());
     }
 
     {
@@ -195,14 +195,14 @@ test Source {
 
         var received = try noti.recvMsg(&message, .noblock);
         try t.expectEqual(4, received);
-        try t.expectEqualStrings("noti", message.slice().?);
+        try t.expectEqualStrings("noti", message.slice());
         try t.expect(message.more());
 
         received = try noti.recvMsg(&message, .noblock);
         try t.expectEqual(3, received);
-        try t.expectEqualStrings("\x92\x02\x01", message.slice().?);
+        try t.expectEqualStrings("\x92\x02\x01", message.slice());
         var event: Event = undefined;
-        _ = try mzg.unpack(message.slice().?, &event);
+        _ = try mzg.unpack(message.slice(), &event);
         try t.expectEqual(Event{ .@"2" = 1 }, event);
         try t.expect(!message.more());
     }
