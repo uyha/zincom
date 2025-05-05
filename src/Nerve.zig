@@ -31,9 +31,9 @@ pub fn sendPing(self: *Self, name: []const u8, allocator: Allocator) SendError!v
     self.buffer.clearRetainingCapacity();
 
     const writer = self.buffer.writer(allocator);
+    try writer.writeAll("ping");
     try mzg.pack(name, writer);
 
-    try self.head.sendConstSlice("ping", .more);
     try self.head.sendSlice(self.buffer.items, .{});
 }
 
@@ -47,12 +47,22 @@ pub fn sendInfo(
     self.buffer.clearRetainingCapacity();
 
     const writer = self.buffer.writer(allocator);
+    try writer.writeAll("info");
     try mzg.pack(
         .{ name, ping_interval, packMap(&endpoints) },
         writer,
     );
 
-    try self.head.sendConstSlice("info", .more);
+    try self.head.sendSlice(self.buffer.items, .{});
+}
+
+pub fn sendDown(self: *Self, name: []const u8, allocator: Allocator) SendError!void {
+    self.buffer.clearRetainingCapacity();
+
+    const writer = self.buffer.writer(allocator);
+    try writer.writeAll("down");
+    try mzg.pack(name, writer);
+
     try self.head.sendSlice(self.buffer.items, .{});
 }
 
@@ -86,12 +96,8 @@ test sendInfo {
     defer message.deinit();
 
     _ = try head.recvMsg(&message, .{});
-    try t.expectEqualStrings("info", message.slice());
-    try t.expect(message.more());
-
-    _ = try head.recvMsg(&message, .{});
     try t.expectEqualStrings(
-        "\x93\xA3led\xCE\x77\x35\x94\x00\x81\xA3led\xABinproc://#2",
+        "info\x93\xA3led\xCE\x77\x35\x94\x00\x81\xA3led\xABinproc://#2",
         message.slice(),
     );
     try t.expect(!message.more());
@@ -120,11 +126,34 @@ test sendPing {
     try nerve.sendPing("led", t.allocator);
 
     _ = try head.recvMsg(&message, .{});
-    try t.expectEqualStrings("ping", message.slice());
-    try t.expect(message.more());
+    try t.expectEqualStrings("ping\xA3led", message.slice());
+    try t.expect(!message.more());
+
+    try head.sendConstSlice("", .{});
+    try nerve.processHead();
+}
+
+test sendDown {
+    const t = std.testing;
+
+    var context: *zimq.Context = try .init();
+    defer context.deinit();
+
+    var head: *zimq.Socket = try .init(context, .rep);
+    defer head.deinit();
+
+    try head.bind("inproc://#1/head");
+
+    var nerve: Self = try .init(context, "inproc://#1");
+    defer nerve.deinit(t.allocator);
+
+    var message: zimq.Message = .empty();
+    defer message.deinit();
+
+    try nerve.sendDown("led", t.allocator);
 
     _ = try head.recvMsg(&message, .{});
-    try t.expectEqualStrings("\xA3led", message.slice());
+    try t.expectEqualStrings("down\xA3led", message.slice());
     try t.expect(!message.more());
 
     try head.sendConstSlice("", .{});
@@ -142,5 +171,5 @@ const zimq = @import("zimq");
 const mzg = @import("mzg");
 const packMap = mzg.adapter.packMap;
 
-const zc = @import("root.zig");
-const consumeAll = zc.consumeAll;
+const zic = @import("root.zig");
+const consumeAll = zic.consumeAll;

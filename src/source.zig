@@ -54,18 +54,25 @@ pub fn Source(comptime TData: type) type {
 
         pub fn processPing(
             self: *Self,
-            allocator: std.mem.Allocator,
+            allocator: Allocator,
         ) PingError!void {
             try consumeAll(self.ping);
+            try self.sendPing(allocator);
+        }
 
-            try self.sendHeader(.ping);
-            try self.sendBody(self.current, allocator);
+        pub fn setCurrent(
+            self: *Self,
+            current: Data,
+            allocator: std.mem.Allocator,
+        ) SendError!void {
+            self.current = current;
+            try self.sendPing(allocator);
         }
 
         pub fn setField(
             self: *Self,
             field: Event,
-            allocator: std.mem.Allocator,
+            allocator: Allocator,
         ) SendError!void {
             const current = switch (@typeInfo(Data)) {
                 .optional => if (self.current) |*current| current else return,
@@ -76,42 +83,22 @@ pub fn Source(comptime TData: type) type {
                     @field(current, @tagName(tag)) = value;
                 },
             }
-            try self.sendHeader(.noti);
-            try self.sendBody(field, allocator);
+
+            self.buffer.clearRetainingCapacity();
+
+            const writer = self.buffer.writer(allocator);
+            try writer.writeAll("noti");
+            try mzg.pack(field, writer);
+
+            try self.noti.sendSlice(self.buffer.items, .{});
         }
 
-        pub fn setCurrent(
-            self: *Self,
-            current: Data,
-            allocator: std.mem.Allocator,
-        ) SendError!void {
-            self.current = current;
+        inline fn sendPing(self: *Self, allocator: Allocator) SendError!void {
+            self.buffer.clearRetainingCapacity();
 
-            try self.sendHeader(.ping);
-            try self.sendBody(self.current, allocator);
-        }
-
-        inline fn sendHeader(
-            self: *Self,
-            header: Header,
-        ) zimq.Socket.SendError!void {
-            try self.noti.sendConstSlice(
-                @tagName(header),
-                .{ .send_more = header == .noti or header == .ping },
-            );
-        }
-        inline fn sendBody(
-            self: *Self,
-            body: anytype,
-            allocator: std.mem.Allocator,
-        ) SendError!void {
-            switch (@TypeOf(body)) {
-                Data, Event => {},
-                else => @compileError("buggy implementation, only Data or Event can be sent"),
-            }
-
-            try self.buffer.resize(allocator, 0);
-            try mzg.pack(body, self.buffer.writer(allocator));
+            const writer = self.buffer.writer(allocator);
+            try writer.writeAll("ping");
+            try mzg.pack(self.current, writer);
 
             try self.noti.sendSlice(self.buffer.items, .{});
         }
@@ -157,11 +144,7 @@ test Source {
     defer message.deinit();
 
     _ = try noti.recvMsg(&message, .{});
-    try t.expectEqualStrings("ping", message.slice());
-    try t.expect(message.more());
-
-    _ = try noti.recvMsg(&message, .{});
-    try t.expectEqualStrings("\xc0", message.slice());
+    try t.expectEqualStrings("ping\xc0", message.slice());
     try t.expect(!message.more());
 
     {
@@ -180,40 +163,30 @@ test Source {
             t.allocator,
         );
 
-        var received = try noti.recvMsg(&message, .noblock);
-        try t.expectEqual(4, received);
-        try t.expectEqualStrings("ping", message.slice());
-        try t.expect(message.more());
-
-        received = try noti.recvMsg(&message, .noblock);
-        try t.expectEqual(4, received);
-        try t.expectEqualStrings("\x93\x03\x01\x02", message.slice());
+        const received = try noti.recvMsg(&message, .noblock);
+        try t.expectEqual(8, received);
+        try t.expectEqualStrings("ping\x93\x03\x01\x02", message.slice());
     }
 
     {
         try source.setField(.{ .@"2" = 1 }, t.allocator);
 
-        var received = try noti.recvMsg(&message, .noblock);
-        try t.expectEqual(4, received);
-        try t.expectEqualStrings("noti", message.slice());
-        try t.expect(message.more());
-
-        received = try noti.recvMsg(&message, .noblock);
-        try t.expectEqual(3, received);
-        try t.expectEqualStrings("\x92\x02\x01", message.slice());
+        const received = try noti.recvMsg(&message, .noblock);
+        try t.expectEqual(7, received);
+        try t.expectEqualStrings("noti\x92\x02\x01", message.slice());
         var event: Event = undefined;
-        _ = try mzg.unpack(message.slice(), &event);
+        _ = try mzg.unpack(message.slice()[4..], &event);
         try t.expectEqual(Event{ .@"2" = 1 }, event);
         try t.expect(!message.more());
     }
 }
 
 const std = @import("std");
+const Allocator = std.mem.Allocator;
+
 const zimq = @import("zimq");
 const mzg = @import("mzg");
 const zincom = @import("root.zig");
 
 const consumeAll = zincom.consumeAll;
 const StructAsTaggedUnion = zincom.StructAsTaggedUnion;
-
-const Header = zincom.Header;

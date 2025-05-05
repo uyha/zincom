@@ -56,43 +56,34 @@ pub fn Sink(comptime TData: type) type {
         pub fn process(self: *Self) ProcessError!void {
             _ = try self.noti.recvMsg(&self.message, .noblock);
 
-            const header = self.message.slice();
+            const content = self.message.slice();
 
-            if (std.mem.eql(u8, "ping", header)) {
-                try self.processPing();
+            if (std.mem.startsWith(u8, content, "ping")) {
+                try self.processPing(content[4..]);
                 return;
             }
 
-            if (std.mem.eql(u8, "noti", header)) {
-                try self.processNoti();
+            if (std.mem.startsWith(u8, content, "noti")) {
+                try self.processNoti(content[4..]);
                 return;
             }
 
             return ProcessError.HeaderInvalid;
         }
 
-        fn processPing(self: *Self) ProcessError!void {
-            if (!self.message.more()) {
-                return ProcessError.PartMissing;
-            }
-
-            _ = try self.noti.recvMsg(&self.message, .noblock);
-            _ = try mzg.unpack(self.message.slice(), &self.current);
+        fn processPing(self: *Self, slice: []const u8) ProcessError!void {
+            _ = try mzg.unpack(slice, &self.current);
         }
 
-        fn processNoti(self: *Self) ProcessError!void {
-            if (!self.message.more()) {
-                return ProcessError.PartMissing;
-            }
-
+        fn processNoti(self: *Self, slice: []const u8) ProcessError!void {
             var event: Event = undefined;
             if (self.current) |*current| {
-                const received = try self.noti.recvMsg(&self.message, .noblock);
+                const total = slice.len;
                 var consumed: usize = 0;
 
-                while (consumed < received) {
+                while (consumed < total) {
                     consumed += try mzg.unpack(
-                        self.message.slice()[consumed..],
+                        slice[consumed..],
                         &event,
                     );
 
@@ -102,12 +93,6 @@ pub fn Sink(comptime TData: type) type {
                         },
                     }
                 }
-
-                if (self.message.more()) {
-                    return consumeAll(self.noti);
-                }
-            } else {
-                return consumeAll(self.noti);
             }
         }
     };

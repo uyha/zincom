@@ -1,5 +1,3 @@
-pub const Header = enum { ping, noti };
-
 const utils = @import("utils.zig");
 
 pub const consumeAll = utils.consumeAll;
@@ -13,6 +11,7 @@ const sink = @import("sink.zig");
 pub const Sink = source.Sink;
 
 pub const Info = @import("Info.zig");
+pub const Head = @import("Head.zig");
 pub const Nerve = @import("Nerve.zig");
 
 comptime {
@@ -21,5 +20,6 @@ comptime {
     t.refAllDeclsRecursive(source);
     t.refAllDeclsRecursive(sink);
     t.refAllDeclsRecursive(Info);
+    t.refAllDeclsRecursive(Head);
     t.refAllDeclsRecursive(Nerve);
 }
