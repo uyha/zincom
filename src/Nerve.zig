@@ -37,7 +37,7 @@ pub fn sendPing(self: *Self, name: []const u8, allocator: Allocator) SendError!v
     try self.head.sendSlice(self.buffer.items, .{});
 }
 
-pub fn sendInfo(
+pub fn sendJoin(
     self: *Self,
     name: []const u8,
     ping_interval: u64,
@@ -47,7 +47,7 @@ pub fn sendInfo(
     self.buffer.clearRetainingCapacity();
 
     const writer = self.buffer.writer(allocator);
-    try writer.writeAll("info");
+    try writer.writeAll("join");
     try mzg.pack(
         .{ name, ping_interval, packMap(&endpoints) },
         writer,
@@ -71,7 +71,7 @@ pub fn processHead(self: *Self) HeadError!void {
     try consumeAll(self.head);
 }
 
-test sendInfo {
+test sendJoin {
     const t = std.testing;
 
     var context: *zimq.Context = try .init();
@@ -85,7 +85,7 @@ test sendInfo {
     var nerve: Self = try .init(context, "inproc://#1");
     defer nerve.deinit(t.allocator);
 
-    try nerve.sendInfo(
+    try nerve.sendJoin(
         "led",
         2 * ns_per_s,
         .initComptime(&.{.{ "led", "inproc://#2" }}),
@@ -97,7 +97,7 @@ test sendInfo {
 
     _ = try head.recvMsg(&message, .{});
     try t.expectEqualStrings(
-        "info\x93\xA3led\xCE\x77\x35\x94\x00\x81\xA3led\xABinproc://#2",
+        "join\x93\xA3led\xCE\x77\x35\x94\x00\x81\xA3led\xABinproc://#2",
         message.slice(),
     );
     try t.expect(!message.more());
