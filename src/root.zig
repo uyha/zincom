@@ -12,9 +12,14 @@ pub const Source = source.Source;
 const sink = @import("sink.zig");
 pub const Sink = source.Sink;
 
+pub const Info = @import("Info.zig");
+pub const Nerve = @import("Nerve.zig");
+
 comptime {
     const t = @import("std").testing;
 
     t.refAllDeclsRecursive(source);
     t.refAllDeclsRecursive(sink);
+    t.refAllDeclsRecursive(Info);
+    t.refAllDeclsRecursive(Nerve);
 }
