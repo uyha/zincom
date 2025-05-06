@@ -47,13 +47,13 @@ pub fn process(self: *Head, allocator: Allocator) ProcessError!void {
     _ = try self.head.recvMsg(&self.message, .{});
 
     if (startsWith(u8, self.message.slice(), "join")) {
-        return self.processJoin(self.message.slice()[4..], allocator);
+        return self.processJoin(allocator, self.message.slice()[4..]);
     }
     if (startsWith(u8, self.message.slice(), "ping")) {
-        return self.processPing(self.message.slice()[4..], allocator);
+        return self.processPing(allocator, self.message.slice()[4..]);
     }
     if (startsWith(u8, self.message.slice(), "down")) {
-        return self.processDown(self.message.slice()[4..], allocator);
+        return self.processDown(allocator, self.message.slice()[4..]);
     }
 
     return ProcessError.HeaderInvalid;
@@ -61,8 +61,8 @@ pub fn process(self: *Head, allocator: Allocator) ProcessError!void {
 
 fn processJoin(
     self: *Head,
-    slice: []const u8,
     allocator: Allocator,
+    slice: []const u8,
 ) ProcessError!void {
     var raw: ArrayListUnmanaged(u8) = .empty;
     errdefer raw.deinit(allocator);
@@ -155,8 +155,8 @@ test processJoin {
 
 fn processPing(
     self: *Head,
-    slice: []const u8,
     allocator: Allocator,
+    slice: []const u8,
 ) ProcessError!void {
     var name: []const u8 = undefined;
     _ = try mzg.unpack(slice, &name);
@@ -247,27 +247,14 @@ test processPing {
 
 fn processDown(
     self: *Head,
-    slice: []const u8,
     allocator: Allocator,
+    slice: []const u8,
 ) ProcessError!void {
     var name: []const u8 = undefined;
     _ = try mzg.unpack(slice, &name);
 
-    const result: Down = blk: {
-        if (self.members.getEntry(name)) |entry| {
-            entry.value_ptr.deinit(allocator);
-            _ = self.members.swapRemove(name);
-
-            var raw = self.raws.fetchSwapRemove(name);
-            if (raw) |*kv| {
-                kv.value.deinit(allocator);
-            }
-
-            break :blk Down.success;
-        } else {
-            break :blk Down.absence;
-        }
-    };
+    const result: Down =
+        if (self.removeMember(allocator, name)) .success else .absence;
 
     self.buffer.clearRetainingCapacity();
     const writer = self.buffer.writer(allocator);
@@ -275,6 +262,20 @@ fn processDown(
     try mzg.pack(result, writer);
 
     try self.head.sendSlice(self.buffer.items, .{});
+}
+fn removeMember(self: *Head, allocator: Allocator, name: []const u8) bool {
+    if (self.members.getEntry(name)) |entry| {
+        entry.value_ptr.deinit(allocator);
+        _ = self.members.swapRemove(name);
+
+        var raw = self.raws.fetchSwapRemove(name);
+        if (raw) |*kv| {
+            kv.value.deinit(allocator);
+        }
+
+        return true;
+    }
+    return false;
 }
 
 test processDown {
