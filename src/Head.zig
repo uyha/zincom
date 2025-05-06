@@ -1,7 +1,6 @@
 const Head = @This();
 
 head: *zimq.Socket,
-raws: StringArrayHashMapUnmanaged(ArrayListUnmanaged(u8)) = .empty,
 members: StringArrayHashMapUnmanaged(Member) = .empty,
 
 buffer: ArrayListUnmanaged(u8) = .empty,
@@ -32,11 +31,6 @@ pub fn deinit(self: *Head, allocator: Allocator) void {
         value.deinit(allocator);
     }
     self.members.deinit(allocator);
-
-    for (self.raws.entries.items(.value)) |*value| {
-        value.deinit(allocator);
-    }
-    self.raws.deinit(allocator);
 
     self.buffer.deinit(allocator);
     self.message.deinit();
@@ -79,12 +73,12 @@ fn processJoin(
             registration.deinit(allocator);
             break :result Join.duplicate;
         } else {
-            try self.raws.put(allocator, registration.name, raw);
             try self.members.put(allocator, registration.name, .{
                 .name = registration.name,
                 .interval = registration.interval,
-                .endpoints = registration.endpoints,
                 .last_ping = try .now(),
+                .endpoints = registration.endpoints,
+                .raw = raw,
             });
 
             break :result Join.success;
@@ -254,7 +248,7 @@ fn processDown(
     _ = try mzg.unpack(slice, &name);
 
     const result: Down =
-        if (self.removeMember(allocator, name)) .success else .absence;
+        if (self.removeByName(allocator, name)) .success else .absence;
 
     self.buffer.clearRetainingCapacity();
     const writer = self.buffer.writer(allocator);
@@ -262,20 +256,6 @@ fn processDown(
     try mzg.pack(result, writer);
 
     try self.head.sendSlice(self.buffer.items, .{});
-}
-fn removeMember(self: *Head, allocator: Allocator, name: []const u8) bool {
-    if (self.members.getEntry(name)) |entry| {
-        entry.value_ptr.deinit(allocator);
-        _ = self.members.swapRemove(name);
-
-        var raw = self.raws.fetchSwapRemove(name);
-        if (raw) |*kv| {
-            kv.value.deinit(allocator);
-        }
-
-        return true;
-    }
-    return false;
 }
 
 test processDown {
@@ -362,6 +342,119 @@ test processDown {
     }
 }
 
+pub const CheckError = error{Unsupported};
+pub fn checkMembers(self: *Head, allocator: Allocator) CheckError!void {
+    const now: Instant = try .now();
+
+    var i: usize = 0;
+    while (i < self.members.count()) {
+        var member = self.members.entries.get(i).value;
+        if (now.since(member.last_ping) <= member.interval) {
+            i += 1;
+            continue;
+        }
+        member.deinit(allocator);
+        self.members.swapRemoveAt(i);
+    }
+}
+
+fn removeByName(self: *Head, allocator: Allocator, name: []const u8) bool {
+    var entry = self.members.fetchSwapRemove(name);
+    if (entry) |*kv| {
+        kv.value.deinit(allocator);
+
+        return true;
+    }
+    return false;
+}
+
+test checkMembers {
+    const t = std.testing;
+
+    var context: *zimq.Context = try .init();
+    defer context.deinit();
+
+    var head: Head = try .init(context, "inproc://#1");
+    defer head.deinit(t.allocator);
+
+    var nerve: *zimq.Socket = try .init(context, .req);
+    defer nerve.deinit();
+
+    try nerve.connect("inproc://#1/head");
+
+    var buffer: ArrayListUnmanaged(u8) = .empty;
+    defer buffer.deinit(t.allocator);
+
+    var message: zimq.Message = .empty();
+    {
+        defer buffer.clearRetainingCapacity();
+
+        const writer = buffer.writer(t.allocator);
+        try writer.writeAll("join");
+        try mzg.pack(
+            .{ "test1", 10 * ns_per_ms, packMap(&StringArrayHashMapUnmanaged(u8).empty) },
+            writer,
+        );
+        try nerve.sendSlice(buffer.items, .{});
+        try head.process(t.allocator);
+        _ = try nerve.recvMsg(&message, .{});
+    }
+    {
+        defer buffer.clearRetainingCapacity();
+
+        const writer = buffer.writer(t.allocator);
+        try writer.writeAll("join");
+        try mzg.pack(
+            .{ "test2", 10 * ns_per_s, packMap(&StringArrayHashMapUnmanaged(u8).empty) },
+            writer,
+        );
+        try nerve.sendSlice(buffer.items, .{});
+        try head.process(t.allocator);
+        _ = try nerve.recvMsg(&message, .{});
+    }
+
+    try head.checkMembers(t.allocator);
+    try t.expectEqual(2, head.members.count());
+
+    std.Thread.sleep(11 * ns_per_ms);
+
+    try head.checkMembers(t.allocator);
+    try t.expectEqual(1, head.members.count());
+
+    {
+        defer buffer.clearRetainingCapacity();
+
+        const writer = buffer.writer(t.allocator);
+        try writer.writeAll("ping");
+        try mzg.pack("test1", writer);
+        try nerve.sendSlice(buffer.items, .{});
+        try head.process(t.allocator);
+
+        _ = try nerve.recvMsg(&message, .{});
+        try t.expect(!message.more());
+        try t.expectEqual(
+            Response{ .ping = .absence },
+            try Response.parse(message.slice()),
+        );
+    }
+    {
+        defer buffer.clearRetainingCapacity();
+
+        const writer = buffer.writer(t.allocator);
+        try writer.writeAll("ping");
+        try mzg.pack("test2", writer);
+        try nerve.sendSlice(buffer.items, .{});
+        try head.process(t.allocator);
+
+        _ = try nerve.recvMsg(&message, .{});
+        try t.expect(!message.more());
+        try t.expectEqual(
+            Response{ .ping = .success },
+            try Response.parse(message.slice()),
+        );
+    }
+}
+
 pub const Registration = struct {
     name: []const u8,
     interval: u64,
@@ -419,11 +512,13 @@ test Registration {
 pub const Member = struct {
     name: []const u8,
     interval: u64,
-    endpoints: StringArrayHashMapUnmanaged([]const u8),
     last_ping: Instant,
+    endpoints: StringArrayHashMapUnmanaged([]const u8),
+    raw: ArrayListUnmanaged(u8),
 
     pub fn deinit(self: *Member, allocator: Allocator) void {
         self.endpoints.deinit(allocator);
+        self.raw.deinit(allocator);
     }
 };
 
@@ -433,6 +528,7 @@ const Allocator = std.mem.Allocator;
 const ArrayListUnmanaged = std.ArrayListUnmanaged;
 const startsWith = std.mem.startsWith;
 const ns_per_s = std.time.ns_per_s;
+const ns_per_ms = std.time.ns_per_ms;
 const Instant = std.time.Instant;
 
 const zimq = @import("zimq");
