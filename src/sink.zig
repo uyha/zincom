@@ -17,7 +17,11 @@ pub fn Sink(comptime TData: type) type {
         pub const InitError = zimq.Socket.InitError || zimq.Socket.ConnectError || zimq.Socket.SetError;
         pub const ProcessError = zimq.Socket.RecvMsgError || std.mem.Allocator.Error || mzg.UnpackError || error{ PartMissing, HeaderInvalid };
 
-        pub fn init(context: *zimq.Context, prefix: []const u8) InitError!Self {
+        pub const Endpoints = struct {
+            ping: [:0]const u8,
+            noti: [:0]const u8,
+        };
+        pub fn init(context: *zimq.Context, endpoints: Endpoints) InitError!Self {
             const result: Self = .{
                 .ping = try .init(context, .push),
                 .noti = try .init(context, .sub),
@@ -27,18 +31,8 @@ pub fn Sink(comptime TData: type) type {
             try result.noti.set(.subscribe, "ping");
             try result.noti.set(.subscribe, "noti");
 
-            var buffer: [1024]u8 = undefined;
-
-            try result.ping.connect(std.fmt.bufPrintZ(
-                &buffer,
-                "{s}/ping",
-                .{prefix},
-            ) catch @panic("buffer too small"));
-            try result.noti.connect(std.fmt.bufPrintZ(
-                &buffer,
-                "{s}/noti",
-                .{prefix},
-            ) catch @panic("buffer too small"));
+            try result.ping.connect(endpoints.ping);
+            try result.noti.connect(endpoints.noti);
 
             return result;
         }
@@ -107,14 +101,19 @@ test Sink {
     var poller: *zimq.Poller = try .init();
     defer poller.deinit();
 
-    const prefix = "inproc://#1";
-
     const Data = struct { a: u8, @"1": u8, @"2": u8 };
     const init_data: Data = .{ .a = 1, .@"1" = 1, .@"2" = 1 };
-    var source: zincom.Source(?Data) = try .init(context, prefix, init_data);
+    var source: zincom.Source(?Data) = try .init(
+        context,
+        .{ .ping = "inproc://#1/ping", .noti = "inproc://#1/noti" },
+        init_data,
+    );
     defer source.deinit(t.allocator);
 
-    var sink: Sink(Data) = try .init(context, prefix);
+    var sink: Sink(Data) = try .init(context, .{
+        .ping = "inproc://#1/ping",
+        .noti = "inproc://#1/noti",
+    });
     defer sink.deinit();
 
     try poller.add(sink.noti, null, .in);

@@ -1,35 +1,32 @@
-const Self = @This();
+const Nerve = @This();
 
 head: *zimq.Socket,
 buffer: ArrayListUnmanaged(u8) = .empty,
 message: zimq.Message,
 
 pub const InitError = zimq.Socket.InitError || zimq.Socket.ConnectError;
-pub fn init(context: *zimq.Context, prefix: []const u8) InitError!Self {
-    const result: Self = .{
+pub const Endpoints = struct {
+    head: [:0]const u8,
+};
+pub fn init(context: *zimq.Context, endpoints: anytype) InitError!Nerve {
+    const result: Nerve = .{
         .head = try .init(context, .req),
         .message = .empty(),
     };
 
-    var buffer: [1024]u8 = undefined;
-
-    try result.head.connect(std.fmt.bufPrintZ(
-        &buffer,
-        "{s}/head",
-        .{prefix},
-    ) catch @panic("buffer too small"));
+    try result.head.connect(endpoints.head);
 
     return result;
 }
 
-pub fn deinit(self: *Self, allocator: Allocator) void {
+pub fn deinit(self: *Nerve, allocator: Allocator) void {
     self.head.deinit();
     self.buffer.deinit(allocator);
 }
 
 pub const SendError = zimq.Socket.SendError || mzg.PackError(ArrayListUnmanaged(u8).Writer);
 
-pub fn sendPing(self: *Self, allocator: Allocator, name: []const u8) SendError!void {
+pub fn sendPing(self: *Nerve, allocator: Allocator, name: []const u8) SendError!void {
     self.buffer.clearRetainingCapacity();
 
     const writer = self.buffer.writer(allocator);
@@ -40,7 +37,7 @@ pub fn sendPing(self: *Self, allocator: Allocator, name: []const u8) SendError!v
 }
 
 pub fn sendJoin(
-    self: *Self,
+    self: *Nerve,
     allocator: Allocator,
     name: []const u8,
     ping_interval: u64,
@@ -58,7 +55,7 @@ pub fn sendJoin(
     try self.head.sendSlice(self.buffer.items, .{});
 }
 
-pub fn sendDown(self: *Self, allocator: Allocator, name: []const u8) SendError!void {
+pub fn sendDown(self: *Nerve, allocator: Allocator, name: []const u8) SendError!void {
     self.buffer.clearRetainingCapacity();
 
     const writer = self.buffer.writer(allocator);
@@ -69,7 +66,7 @@ pub fn sendDown(self: *Self, allocator: Allocator, name: []const u8) SendError!v
 }
 
 pub const ResponseError = zimq.Socket.RecvMsgError || Response.Error;
-pub fn getHeadReponse(self: *Self) ResponseError!Response {
+pub fn getHeadReponse(self: *Nerve) ResponseError!Response {
     _ = try self.head.recvMsg(&self.message, .{});
 
     return Response.parse(self.message.slice());
@@ -89,7 +86,7 @@ test sendJoin {
 
     try head.bind("inproc://#1/head");
 
-    var nerve: Self = try .init(context, "inproc://#1");
+    var nerve: Nerve = try .init(context, .{ .head = "inproc://#1/head" });
     defer nerve.deinit(t.allocator);
 
     try nerve.sendJoin(
@@ -122,7 +119,7 @@ test sendPing {
 
     try head.bind("inproc://#1/head");
 
-    var nerve: Self = try .init(context, "inproc://#1");
+    var nerve: Nerve = try .init(context, .{ .head = "inproc://#1/head" });
     defer nerve.deinit(t.allocator);
 
     var message: zimq.Message = .empty();
@@ -150,7 +147,7 @@ test sendDown {
 
     try head.bind("inproc://#1/head");
 
-    var nerve: Self = try .init(context, "inproc://#1");
+    var nerve: Nerve = try .init(context, .{ .head = "inproc://#1/head" });
     defer nerve.deinit(t.allocator);
 
     var message: zimq.Message = .empty();

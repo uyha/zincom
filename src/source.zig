@@ -17,9 +17,13 @@ pub fn Source(comptime TData: type) type {
         pub const SendError = zimq.Socket.SendError || std.mem.Allocator.Error || mzg.PackError(std.ArrayListUnmanaged(u8).Writer);
         pub const PingError = SendError || zimq.Socket.RecvError;
 
+        pub const Endpoints = struct {
+            ping: [:0]const u8,
+            noti: [:0]const u8,
+        };
         pub fn init(
             context: *zimq.Context,
-            prefix: []const u8,
+            endpoints: Endpoints,
             inital_data: Data,
         ) InitError!Self {
             const result: Self = .{
@@ -29,18 +33,8 @@ pub fn Source(comptime TData: type) type {
                 .current = inital_data,
             };
 
-            var buffer: [1024]u8 = undefined;
-
-            try result.ping.bind(std.fmt.bufPrintZ(
-                &buffer,
-                "{s}/ping",
-                .{prefix},
-            ) catch @panic("buffer too small"));
-            try result.noti.bind(std.fmt.bufPrintZ(
-                &buffer,
-                "{s}/noti",
-                .{prefix},
-            ) catch @panic("buffer too small"));
+            try result.ping.bind(endpoints.ping);
+            try result.noti.bind(endpoints.noti);
 
             return result;
         }
@@ -116,7 +110,7 @@ test Source {
     const Data = struct { a: u8, @"1": u8, @"2": u8 };
     var source: Source(?Data) = try .init(
         context,
-        "inproc://#1",
+        .{ .ping = "inproc://#1/ping", .noti = "inproc://#1/noti" },
         null,
     );
     defer source.deinit(t.allocator);

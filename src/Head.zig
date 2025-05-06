@@ -7,19 +7,16 @@ buffer: ArrayListUnmanaged(u8) = .empty,
 message: zimq.Message,
 
 pub const InitError = zimq.Socket.InitError || zimq.Socket.BindError;
-pub fn init(context: *zimq.Context, prefix: []const u8) InitError!Head {
+pub const Endpoints = struct {
+    head: [:0]const u8,
+};
+pub fn init(context: *zimq.Context, endpoints: Endpoints) InitError!Head {
     const result: Head = .{
         .head = try .init(context, .rep),
         .message = .empty(),
     };
 
-    var buffer: [1024]u8 = undefined;
-
-    try result.head.bind(std.fmt.bufPrintZ(
-        &buffer,
-        "{s}/head",
-        .{prefix},
-    ) catch @panic("buffer too small"));
+    try result.head.bind(endpoints.head);
 
     return result;
 }
@@ -99,7 +96,7 @@ test processJoin {
     var context: *zimq.Context = try .init();
     defer context.deinit();
 
-    var head: Head = try .init(context, "inproc://#1");
+    var head: Head = try .init(context, .{ .head = "inproc://#1/head" });
     defer head.deinit(t.allocator);
 
     var nerve: *zimq.Socket = try .init(context, .req);
@@ -178,7 +175,7 @@ test processPing {
     var context: *zimq.Context = try .init();
     defer context.deinit();
 
-    var head: Head = try .init(context, "inproc://#1");
+    var head: Head = try .init(context, .{ .head = "inproc://#1/head" });
     defer head.deinit(t.allocator);
 
     var nerve: *zimq.Socket = try .init(context, .req);
@@ -264,7 +261,7 @@ test processDown {
     var context: *zimq.Context = try .init();
     defer context.deinit();
 
-    var head: Head = try .init(context, "inproc://#1");
+    var head: Head = try .init(context, .{ .head = "inproc://#1/head" });
     defer head.deinit(t.allocator);
 
     var nerve: *zimq.Socket = try .init(context, .req);
@@ -374,7 +371,7 @@ test checkMembers {
     var context: *zimq.Context = try .init();
     defer context.deinit();
 
-    var head: Head = try .init(context, "inproc://#1");
+    var head: Head = try .init(context, .{ .head = "inproc://#1/head" });
     defer head.deinit(t.allocator);
 
     var nerve: *zimq.Socket = try .init(context, .req);
