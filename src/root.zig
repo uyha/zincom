@@ -10,7 +10,9 @@ pub const Source = source.Source;
 const sink = @import("sink.zig");
 pub const Sink = source.Sink;
 
-pub const Info = @import("Info.zig");
+const response = @import("response.zig");
+pub const Response = response.Response;
+
 pub const Head = @import("Head.zig");
 pub const Nerve = @import("Nerve.zig");
 
@@ -19,7 +21,7 @@ comptime {
 
     t.refAllDeclsRecursive(source);
     t.refAllDeclsRecursive(sink);
-    t.refAllDeclsRecursive(Info);
+    t.refAllDeclsRecursive(Response);
     t.refAllDeclsRecursive(Head);
     t.refAllDeclsRecursive(Nerve);
 }

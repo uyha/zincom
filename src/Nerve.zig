@@ -2,11 +2,13 @@ const Self = @This();
 
 head: *zimq.Socket,
 buffer: ArrayListUnmanaged(u8) = .empty,
+message: zimq.Message,
 
 pub const InitError = zimq.Socket.InitError || zimq.Socket.ConnectError;
 pub fn init(context: *zimq.Context, prefix: []const u8) InitError!Self {
     const result: Self = .{
         .head = try .init(context, .req),
+        .message = .empty(),
     };
 
     var buffer: [1024]u8 = undefined;
@@ -27,7 +29,7 @@ pub fn deinit(self: *Self, allocator: Allocator) void {
 
 pub const SendError = zimq.Socket.SendError || mzg.PackError(ArrayListUnmanaged(u8).Writer);
 
-pub fn sendPing(self: *Self, name: []const u8, allocator: Allocator) SendError!void {
+pub fn sendPing(self: *Self, allocator: Allocator, name: []const u8) SendError!void {
     self.buffer.clearRetainingCapacity();
 
     const writer = self.buffer.writer(allocator);
@@ -39,10 +41,10 @@ pub fn sendPing(self: *Self, name: []const u8, allocator: Allocator) SendError!v
 
 pub fn sendJoin(
     self: *Self,
+    allocator: Allocator,
     name: []const u8,
     ping_interval: u64,
     endpoints: StaticStringMap([]const u8),
-    allocator: Allocator,
 ) SendError!void {
     self.buffer.clearRetainingCapacity();
 
@@ -56,7 +58,7 @@ pub fn sendJoin(
     try self.head.sendSlice(self.buffer.items, .{});
 }
 
-pub fn sendDown(self: *Self, name: []const u8, allocator: Allocator) SendError!void {
+pub fn sendDown(self: *Self, allocator: Allocator, name: []const u8) SendError!void {
     self.buffer.clearRetainingCapacity();
 
     const writer = self.buffer.writer(allocator);
@@ -66,9 +68,11 @@ pub fn sendDown(self: *Self, name: []const u8, allocator: Allocator) SendError!v
     try self.head.sendSlice(self.buffer.items, .{});
 }
 
-pub const HeadError = zimq.Socket.RecvError;
-pub fn processHead(self: *Self) HeadError!void {
-    try consumeAll(self.head);
+pub const ResponseError = zimq.Socket.RecvMsgError || Response.Error;
+pub fn getHeadReponse(self: *Self) ResponseError!Response {
+    _ = try self.head.recvMsg(&self.message, .{});
+
+    return Response.parse(self.message.slice());
 }
 
 test sendJoin {
@@ -76,6 +80,9 @@ test sendJoin {
 
     var context: *zimq.Context = try .init();
     defer context.deinit();
+
+    var message: zimq.Message = .empty();
+    defer message.deinit();
 
     var head: *zimq.Socket = try .init(context, .rep);
     defer head.deinit();
@@ -86,14 +93,11 @@ test sendJoin {
     defer nerve.deinit(t.allocator);
 
     try nerve.sendJoin(
+        t.allocator,
         "led",
         2 * ns_per_s,
         .initComptime(&.{.{ "led", "inproc://#2" }}),
-        t.allocator,
     );
-
-    var message: zimq.Message = .empty();
-    defer message.deinit();
 
     _ = try head.recvMsg(&message, .{});
     try t.expectEqualStrings(
@@ -102,8 +106,9 @@ test sendJoin {
     );
     try t.expect(!message.more());
 
-    try head.sendConstSlice("", .{});
-    try nerve.processHead();
+    try head.sendConstSlice("join\x00", .{});
+    const response = try nerve.getHeadReponse();
+    try t.expectEqual(Response{ .join = .success }, response);
 }
 
 test sendPing {
@@ -123,14 +128,15 @@ test sendPing {
     var message: zimq.Message = .empty();
     defer message.deinit();
 
-    try nerve.sendPing("led", t.allocator);
+    try nerve.sendPing(t.allocator, "led");
 
     _ = try head.recvMsg(&message, .{});
     try t.expectEqualStrings("ping\xA3led", message.slice());
     try t.expect(!message.more());
 
-    try head.sendConstSlice("", .{});
-    try nerve.processHead();
+    try head.sendConstSlice("ping\x00", .{});
+    const response = try nerve.getHeadReponse();
+    try t.expectEqual(Response{ .ping = .success }, response);
 }
 
 test sendDown {
@@ -150,14 +156,15 @@ test sendDown {
     var message: zimq.Message = .empty();
     defer message.deinit();
 
-    try nerve.sendDown("led", t.allocator);
+    try nerve.sendDown(t.allocator, "led");
 
     _ = try head.recvMsg(&message, .{});
     try t.expectEqualStrings("down\xA3led", message.slice());
     try t.expect(!message.more());
 
-    try head.sendConstSlice("", .{});
-    try nerve.processHead();
+    try head.sendConstSlice("down\x00", .{});
+    const response = try nerve.getHeadReponse();
+    try t.expectEqual(Response{ .down = .success }, response);
 }
 
 const std = @import("std");
@@ -173,3 +180,4 @@ const packMap = mzg.adapter.packMap;
 
 const zic = @import("root.zig");
 const consumeAll = zic.consumeAll;
+const Response = zic.Response;
