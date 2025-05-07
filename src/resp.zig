@@ -1,5 +1,5 @@
 pub const Join = enum { success, duplicate };
-pub const Ping = enum { success, absence };
+pub const Pulse = enum { success, absence };
 pub const Down = enum { success, absence };
 pub const Query = union(enum) {
     endpoints: StringArrayHashMapUnmanaged([]const u8),
@@ -72,7 +72,7 @@ pub const Query = union(enum) {
 
 pub const Resp = union(enum) {
     join: Join,
-    ping: Ping,
+    pulse: Pulse,
     down: Down,
     query: Query,
 
@@ -97,9 +97,9 @@ pub const Resp = union(enum) {
                 consumed += try mzg.unpack(buffer[consumed..], &self.out.join);
                 return consumed;
             }
-            if (eql(u8, header, "ping")) {
-                self.out.* = .{ .ping = undefined };
-                consumed += try mzg.unpack(buffer[consumed..], &self.out.ping);
+            if (eql(u8, header, "pulse")) {
+                self.out.* = .{ .pulse = undefined };
+                consumed += try mzg.unpack(buffer[consumed..], &self.out.pulse);
                 return consumed;
             }
             if (eql(u8, header, "down")) {
@@ -146,12 +146,12 @@ test Resp {
         try Resp.parse(t.allocator, "\xA4join\x01"),
     );
     try t.expectEqual(
-        Resp{ .ping = .success },
-        try Resp.parse(t.allocator, "\xA4ping\x00"),
+        Resp{ .pulse = .success },
+        try Resp.parse(t.allocator, "\xA5pulse\x00"),
     );
     try t.expectEqual(
-        Resp{ .ping = .absence },
-        try Resp.parse(t.allocator, "\xA4ping\x01"),
+        Resp{ .pulse = .absence },
+        try Resp.parse(t.allocator, "\xA5pulse\x01"),
     );
     try t.expectEqual(
         Resp{ .down = .success },

@@ -52,8 +52,8 @@ pub fn processHead(self: *Head, allocator: Allocator) ProcessError!void {
     if (eql(u8, header, "join")) {
         return self.processJoin(allocator, body);
     }
-    if (eql(u8, header, "ping")) {
-        return self.processPing(allocator, body);
+    if (eql(u8, header, "pulse")) {
+        return self.processPulse(allocator, body);
     }
     if (eql(u8, header, "down")) {
         return self.processDown(allocator, body);
@@ -88,7 +88,7 @@ fn processJoin(
             try self.members.put(allocator, registration.name, .{
                 .name = registration.name,
                 .interval = registration.interval,
-                .last_ping = try .now(),
+                .last_pulse = try .now(),
                 .endpoints = registration.endpoints,
                 .raw = raw,
             });
@@ -105,7 +105,7 @@ fn processJoin(
     try self.head.sendSlice(self.buffer.items, .{});
 }
 
-fn processPing(
+fn processPulse(
     self: *Head,
     allocator: Allocator,
     slice: []const u8,
@@ -113,18 +113,18 @@ fn processPing(
     var name: []const u8 = undefined;
     _ = try mzg.unpack(slice, &name);
 
-    const result: Ping = blk: {
+    const result: Pulse = blk: {
         if (self.members.getEntry(name)) |entry| {
-            entry.value_ptr.last_ping = try .now();
-            break :blk Ping.success;
+            entry.value_ptr.last_pulse = try .now();
+            break :blk Pulse.success;
         } else {
-            break :blk Ping.absence;
+            break :blk Pulse.absence;
         }
     };
 
     self.buffer.clearRetainingCapacity();
     const writer = self.buffer.writer(allocator);
-    try mzg.pack("ping", writer);
+    try mzg.pack("pulse", writer);
     try mzg.pack(result, writer);
 
     try self.head.sendSlice(self.buffer.items, .{});
@@ -172,7 +172,7 @@ pub fn checkMembers(self: *Head, allocator: Allocator) CheckError!void {
     var i: usize = 0;
     while (i < self.members.count()) {
         var member = self.members.entries.get(i).value;
-        if (now.since(member.last_ping) <= member.interval) {
+        if (now.since(member.last_pulse) <= member.interval) {
             i += 1;
             continue;
         }
@@ -247,7 +247,7 @@ pub const Registration = struct {
 pub const Member = struct {
     name: []const u8,
     interval: u64,
-    last_ping: Instant,
+    last_pulse: Instant,
     endpoints: StringArrayHashMapUnmanaged([]const u8),
     raw: ArrayListUnmanaged(u8),
 
@@ -316,7 +316,7 @@ test processJoin {
         try t.expectEqual(Resp{ .join = .duplicate }, response);
     }
 }
-test processPing {
+test processPulse {
     const t = std.testing;
 
     var context: *zimq.Context = try .init();
@@ -356,7 +356,7 @@ test processPing {
         defer buffer.clearRetainingCapacity();
 
         const writer = buffer.writer(t.allocator);
-        try mzg.pack("ping", writer);
+        try mzg.pack("pulse", writer);
         try mzg.pack("test", writer);
         try nerve.sendSlice(buffer.items, .{});
         try head.processHead(t.allocator);
@@ -365,14 +365,14 @@ test processPing {
         try t.expect(!message.more());
         var response = try Resp.parse(t.allocator, message.slice());
         defer response.deinit(t.allocator);
-        try t.expectEqual(Resp{ .ping = .success }, response);
+        try t.expectEqual(Resp{ .pulse = .success }, response);
     }
 
     {
         defer buffer.clearRetainingCapacity();
 
         const writer = buffer.writer(t.allocator);
-        try mzg.pack("ping", writer);
+        try mzg.pack("pulse", writer);
         try mzg.pack("asdf", writer);
         try nerve.sendSlice(buffer.items, .{});
         try head.processHead(t.allocator);
@@ -381,7 +381,7 @@ test processPing {
         try t.expect(!message.more());
         var response = try Resp.parse(t.allocator, message.slice());
         defer response.deinit(t.allocator);
-        try t.expectEqual(Resp{ .ping = .absence }, response);
+        try t.expectEqual(Resp{ .pulse = .absence }, response);
     }
 }
 test processDown {
@@ -440,7 +440,7 @@ test processDown {
         defer buffer.clearRetainingCapacity();
 
         const writer = buffer.writer(t.allocator);
-        try mzg.pack("ping", writer);
+        try mzg.pack("pulse", writer);
         try mzg.pack("asdf", writer);
         try nerve.sendSlice(buffer.items, .{});
         try head.processHead(t.allocator);
@@ -449,7 +449,7 @@ test processDown {
         try t.expect(!message.more());
         var response = try Resp.parse(t.allocator, message.slice());
         defer response.deinit(t.allocator);
-        try t.expectEqual(Resp{ .ping = .absence }, response);
+        try t.expectEqual(Resp{ .pulse = .absence }, response);
     }
 
     {
@@ -529,7 +529,7 @@ test checkMembers {
         defer buffer.clearRetainingCapacity();
 
         const writer = buffer.writer(t.allocator);
-        try mzg.pack("ping", writer);
+        try mzg.pack("pulse", writer);
         try mzg.pack("test1", writer);
         try nerve.sendSlice(buffer.items, .{});
         try head.processHead(t.allocator);
@@ -538,13 +538,13 @@ test checkMembers {
         try t.expect(!message.more());
         var response = try Resp.parse(t.allocator, message.slice());
         defer response.deinit(t.allocator);
-        try t.expectEqual(Resp{ .ping = .absence }, response);
+        try t.expectEqual(Resp{ .pulse = .absence }, response);
     }
     {
         defer buffer.clearRetainingCapacity();
 
         const writer = buffer.writer(t.allocator);
-        try mzg.pack("ping", writer);
+        try mzg.pack("pulse", writer);
         try mzg.pack("test2", writer);
         try nerve.sendSlice(buffer.items, .{});
         try head.processHead(t.allocator);
@@ -553,7 +553,7 @@ test checkMembers {
         try t.expect(!message.more());
         var response = try Resp.parse(t.allocator, message.slice());
         defer response.deinit(t.allocator);
-        try t.expectEqual(Resp{ .ping = .success }, response);
+        try t.expectEqual(Resp{ .pulse = .success }, response);
     }
 }
 test Registration {
@@ -587,5 +587,5 @@ const zic = @import("root.zig");
 
 const Resp = zic.Resp;
 const Join = zic.Join;
-const Ping = zic.Ping;
+const Pulse = zic.Pulse;
 const Down = zic.Down;

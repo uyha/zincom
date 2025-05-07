@@ -12,7 +12,7 @@ pub const Sink = source.Sink;
 
 const resp = @import("resp.zig");
 pub const Join = resp.Join;
-pub const Ping = resp.Ping;
+pub const Pulse = resp.Pulse;
 pub const Down = resp.Down;
 pub const Query = resp.Query;
 pub const Resp = resp.Resp;

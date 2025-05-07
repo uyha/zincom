@@ -72,11 +72,11 @@ test "Head and Nerve down" {
     }
 
     {
-        try nerve.sendPing(allocator, "test");
+        try nerve.sendPulse(allocator, "test");
         try head.processHead(allocator);
 
         const response = try nerve.getResponse(allocator);
-        try t.expectEqual(zic.Resp{ .ping = .absence }, response);
+        try t.expectEqual(zic.Resp{ .pulse = .absence }, response);
     }
 
     {
@@ -124,22 +124,22 @@ test "Head and Nerve checkMembers" {
         sleep(5 * ns_per_ms);
         try head.checkMembers(allocator);
 
-        try nerve.sendPing(allocator, "test");
+        try nerve.sendPulse(allocator, "test");
         try head.processHead(allocator);
 
         const response = try nerve.getResponse(allocator);
-        try t.expectEqual(zic.Resp{ .ping = .success }, response);
+        try t.expectEqual(zic.Resp{ .pulse = .success }, response);
     }
 
     {
         sleep(11 * ns_per_ms);
         try head.checkMembers(allocator);
 
-        try nerve.sendPing(allocator, "test");
+        try nerve.sendPulse(allocator, "test");
         try head.processHead(allocator);
 
         const response = try nerve.getResponse(allocator);
-        try t.expectEqual(zic.Resp{ .ping = .absence }, response);
+        try t.expectEqual(zic.Resp{ .pulse = .absence }, response);
     }
 }
 

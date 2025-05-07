@@ -24,11 +24,11 @@ pub fn deinit(self: *Nerve, allocator: Allocator) void {
 pub const SendError =
     zimq.Socket.SendError || mzg.PackError(ArrayListUnmanaged(u8).Writer);
 
-pub fn sendPing(self: *Nerve, allocator: Allocator, name: []const u8) SendError!void {
+pub fn sendPulse(self: *Nerve, allocator: Allocator, name: []const u8) SendError!void {
     self.buffer.clearRetainingCapacity();
 
     const writer = self.buffer.writer(allocator);
-    try mzg.pack("ping", writer);
+    try mzg.pack("pulse", writer);
     try mzg.pack(name, writer);
 
     try self.head.sendSlice(self.buffer.items, .{});
@@ -38,7 +38,7 @@ pub fn sendJoin(
     self: *Nerve,
     allocator: Allocator,
     name: []const u8,
-    ping_interval: u64,
+    interval: u64,
     endpoints: StaticStringMap([]const u8),
 ) SendError!void {
     self.buffer.clearRetainingCapacity();
@@ -46,7 +46,7 @@ pub fn sendJoin(
     const writer = self.buffer.writer(allocator);
     try mzg.pack("join", writer);
     try mzg.pack(
-        .{ name, ping_interval, packMap(&endpoints) },
+        .{ name, interval, packMap(&endpoints) },
         writer,
     );
 
@@ -107,7 +107,7 @@ test sendJoin {
     try t.expectEqual(Response{ .join = .success }, response);
 }
 
-test sendPing {
+test sendPulse {
     const t = std.testing;
 
     var context: *zimq.Context = try .init();
@@ -124,16 +124,16 @@ test sendPing {
     var message: zimq.Message = .empty();
     defer message.deinit();
 
-    try nerve.sendPing(t.allocator, "led");
+    try nerve.sendPulse(t.allocator, "led");
 
     _ = try head.recvMsg(&message, .{});
-    try t.expectEqualStrings("\xA4ping\xA3led", message.slice());
+    try t.expectEqualStrings("\xA5pulse\xA3led", message.slice());
     try t.expect(!message.more());
 
-    try head.sendConstSlice("\xA4ping\x00", .{});
+    try head.sendConstSlice("\xA5pulse\x00", .{});
     var response = try nerve.getResponse(t.allocator);
     defer response.deinit(t.allocator);
-    try t.expectEqual(Response{ .ping = .success }, response);
+    try t.expectEqual(Response{ .pulse = .success }, response);
 }
 
 test sendDown {
