@@ -53,7 +53,6 @@ test "Head and Nerve ping" {
         },
     ));
     try head.process(allocator);
-
     _ = try nerve.getResponse(allocator);
 
     {
@@ -91,23 +90,38 @@ test "Head and Nerve down" {
         },
     ));
     try head.process(allocator);
-
     _ = try nerve.getResponse(allocator);
+
+    {
+        try nerve.sendDown(allocator, "test");
+        try head.process(allocator);
+
+        const response = try nerve.getResponse(allocator);
+        try t.expectEqual(zic.Response{ .down = .success }, response);
+    }
 
     {
         try nerve.sendPing(allocator, "test");
         try head.process(allocator);
 
         const response = try nerve.getResponse(allocator);
-        try t.expectEqual(zic.Response{ .ping = .success }, response);
+        try t.expectEqual(zic.Response{ .ping = .absence }, response);
     }
 
     {
-        try nerve.sendPing(allocator, "nopenoneverexists");
+        try nerve.sendDown(allocator, "test");
         try head.process(allocator);
 
         const response = try nerve.getResponse(allocator);
-        try t.expectEqual(zic.Response{ .ping = .absence }, response);
+        try t.expectEqual(zic.Response{ .down = .absence }, response);
+    }
+
+    {
+        try nerve.sendDown(allocator, "nopenoneverexists");
+        try head.process(allocator);
+
+        const response = try nerve.getResponse(allocator);
+        try t.expectEqual(zic.Response{ .down = .absence }, response);
     }
 }
 
