@@ -35,16 +35,16 @@ pub fn deinit(self: *Head, allocator: Allocator) void {
 
 pub const ProcessError = zimq.Socket.RecvMsgError || zimq.Socket.SendError || mzg.UnpackError || error{ HeaderInvalid, Unsupported };
 pub fn process(self: *Head, allocator: Allocator) ProcessError!void {
-    _ = try self.head.recvMsg(&self.message, .{});
+    const header, const body = try self.getRequest();
 
-    if (startsWith(u8, self.message.slice(), "join")) {
-        return self.processJoin(allocator, self.message.slice()[4..]);
+    if (eql(u8, header, "join")) {
+        return self.processJoin(allocator, body);
     }
-    if (startsWith(u8, self.message.slice(), "ping")) {
-        return self.processPing(allocator, self.message.slice()[4..]);
+    if (eql(u8, header, "ping")) {
+        return self.processPing(allocator, body);
     }
-    if (startsWith(u8, self.message.slice(), "down")) {
-        return self.processDown(allocator, self.message.slice()[4..]);
+    if (eql(u8, header, "down")) {
+        return self.processDown(allocator, body);
     }
 
     return ProcessError.HeaderInvalid;
@@ -84,7 +84,7 @@ fn processJoin(
 
     self.buffer.clearRetainingCapacity();
     const writer = self.buffer.writer(allocator);
-    try writer.writeAll("join");
+    try mzg.pack("join", writer);
     try mzg.pack(result, writer);
 
     try self.head.sendSlice(self.buffer.items, .{});
@@ -108,7 +108,7 @@ test processJoin {
     defer buffer.deinit(t.allocator);
 
     const writer = buffer.writer(t.allocator);
-    try writer.writeAll("join");
+    try mzg.pack("join", writer);
     try mzg.pack(
         .{ "test", 1 * ns_per_s, packMap(&StringArrayHashMapUnmanaged(u8).empty) },
         writer,
@@ -126,10 +126,11 @@ test processJoin {
     _ = try nerve.recvMsg(&message, .{});
     try t.expect(!message.more());
 
-    try t.expectEqual(
-        Response{ .join = .success },
-        try Response.parse(message.slice()),
-    );
+    {
+        var response = try Response.parse(t.allocator, message.slice());
+        defer response.deinit(t.allocator);
+        try t.expectEqual(Response{ .join = .success }, response);
+    }
 
     // Joining again should fail with `duplicate` returned
     try nerve.sendSlice(buffer.items, .{});
@@ -138,10 +139,11 @@ test processJoin {
     _ = try nerve.recvMsg(&message, .{});
     try t.expect(!message.more());
 
-    try t.expectEqual(
-        Response{ .join = .duplicate },
-        try Response.parse(message.slice()),
-    );
+    {
+        var response = try Response.parse(t.allocator, message.slice());
+        defer response.deinit(t.allocator);
+        try t.expectEqual(Response{ .join = .duplicate }, response);
+    }
 }
 
 fn processPing(
@@ -163,7 +165,7 @@ fn processPing(
 
     self.buffer.clearRetainingCapacity();
     const writer = self.buffer.writer(allocator);
-    try writer.writeAll("ping");
+    try mzg.pack("ping", writer);
     try mzg.pack(result, writer);
 
     try self.head.sendSlice(self.buffer.items, .{});
@@ -191,7 +193,7 @@ test processPing {
         defer buffer.clearRetainingCapacity();
 
         const writer = buffer.writer(t.allocator);
-        try writer.writeAll("join");
+        try mzg.pack("join", writer);
         try mzg.pack(
             .{ "test", 1 * ns_per_s, packMap(&StringArrayHashMapUnmanaged(u8).empty) },
             writer,
@@ -205,34 +207,32 @@ test processPing {
         defer buffer.clearRetainingCapacity();
 
         const writer = buffer.writer(t.allocator);
-        try writer.writeAll("ping");
+        try mzg.pack("ping", writer);
         try mzg.pack("test", writer);
         try nerve.sendSlice(buffer.items, .{});
         try head.process(t.allocator);
 
         _ = try nerve.recvMsg(&message, .{});
         try t.expect(!message.more());
-        try t.expectEqual(
-            Response{ .ping = .success },
-            try Response.parse(message.slice()),
-        );
+        var response = try Response.parse(t.allocator, message.slice());
+        defer response.deinit(t.allocator);
+        try t.expectEqual(Response{ .ping = .success }, response);
     }
 
     {
         defer buffer.clearRetainingCapacity();
 
         const writer = buffer.writer(t.allocator);
-        try writer.writeAll("ping");
+        try mzg.pack("ping", writer);
         try mzg.pack("asdf", writer);
         try nerve.sendSlice(buffer.items, .{});
         try head.process(t.allocator);
 
         _ = try nerve.recvMsg(&message, .{});
         try t.expect(!message.more());
-        try t.expectEqual(
-            Response{ .ping = .absence },
-            try Response.parse(message.slice()),
-        );
+        var response = try Response.parse(t.allocator, message.slice());
+        defer response.deinit(t.allocator);
+        try t.expectEqual(Response{ .ping = .absence }, response);
     }
 }
 
@@ -249,7 +249,7 @@ fn processDown(
 
     self.buffer.clearRetainingCapacity();
     const writer = self.buffer.writer(allocator);
-    try writer.writeAll("down");
+    try mzg.pack("down", writer);
     try mzg.pack(result, writer);
 
     try self.head.sendSlice(self.buffer.items, .{});
@@ -277,7 +277,7 @@ test processDown {
         defer buffer.clearRetainingCapacity();
 
         const writer = buffer.writer(t.allocator);
-        try writer.writeAll("join");
+        try mzg.pack("join", writer);
         try mzg.pack(
             .{ "test", 1 * ns_per_s, packMap(&StringArrayHashMapUnmanaged(u8).empty) },
             writer,
@@ -291,51 +291,48 @@ test processDown {
         defer buffer.clearRetainingCapacity();
 
         const writer = buffer.writer(t.allocator);
-        try writer.writeAll("down");
+        try mzg.pack("down", writer);
         try mzg.pack("test", writer);
         try nerve.sendSlice(buffer.items, .{});
         try head.process(t.allocator);
 
         _ = try nerve.recvMsg(&message, .{});
         try t.expect(!message.more());
-        try t.expectEqual(
-            Response{ .down = .success },
-            try Response.parse(message.slice()),
-        );
+        var response = try Response.parse(t.allocator, message.slice());
+        defer response.deinit(t.allocator);
+        try t.expectEqual(Response{ .down = .success }, response);
     }
 
     {
         defer buffer.clearRetainingCapacity();
 
         const writer = buffer.writer(t.allocator);
-        try writer.writeAll("ping");
+        try mzg.pack("ping", writer);
         try mzg.pack("asdf", writer);
         try nerve.sendSlice(buffer.items, .{});
         try head.process(t.allocator);
 
         _ = try nerve.recvMsg(&message, .{});
         try t.expect(!message.more());
-        try t.expectEqual(
-            Response{ .ping = .absence },
-            try Response.parse(message.slice()),
-        );
+        var response = try Response.parse(t.allocator, message.slice());
+        defer response.deinit(t.allocator);
+        try t.expectEqual(Response{ .ping = .absence }, response);
     }
 
     {
         defer buffer.clearRetainingCapacity();
 
         const writer = buffer.writer(t.allocator);
-        try writer.writeAll("down");
+        try mzg.pack("down", writer);
         try mzg.pack("test", writer);
         try nerve.sendSlice(buffer.items, .{});
         try head.process(t.allocator);
 
         _ = try nerve.recvMsg(&message, .{});
         try t.expect(!message.more());
-        try t.expectEqual(
-            Response{ .down = .absence },
-            try Response.parse(message.slice()),
-        );
+        var response = try Response.parse(t.allocator, message.slice());
+        defer response.deinit(t.allocator);
+        try t.expectEqual(Response{ .down = .absence }, response);
     }
 }
 
@@ -387,7 +384,7 @@ test checkMembers {
         defer buffer.clearRetainingCapacity();
 
         const writer = buffer.writer(t.allocator);
-        try writer.writeAll("join");
+        try mzg.pack("join", writer);
         try mzg.pack(
             .{ "test1", 10 * ns_per_ms, packMap(&StringArrayHashMapUnmanaged(u8).empty) },
             writer,
@@ -400,7 +397,7 @@ test checkMembers {
         defer buffer.clearRetainingCapacity();
 
         const writer = buffer.writer(t.allocator);
-        try writer.writeAll("join");
+        try mzg.pack("join", writer);
         try mzg.pack(
             .{ "test2", 10 * ns_per_s, packMap(&StringArrayHashMapUnmanaged(u8).empty) },
             writer,
@@ -422,33 +419,31 @@ test checkMembers {
         defer buffer.clearRetainingCapacity();
 
         const writer = buffer.writer(t.allocator);
-        try writer.writeAll("ping");
+        try mzg.pack("ping", writer);
         try mzg.pack("test1", writer);
         try nerve.sendSlice(buffer.items, .{});
         try head.process(t.allocator);
 
         _ = try nerve.recvMsg(&message, .{});
         try t.expect(!message.more());
-        try t.expectEqual(
-            Response{ .ping = .absence },
-            try Response.parse(message.slice()),
-        );
+        var response = try Response.parse(t.allocator, message.slice());
+        defer response.deinit(t.allocator);
+        try t.expectEqual(Response{ .ping = .absence }, response);
     }
     {
         defer buffer.clearRetainingCapacity();
 
         const writer = buffer.writer(t.allocator);
-        try writer.writeAll("ping");
+        try mzg.pack("ping", writer);
         try mzg.pack("test2", writer);
         try nerve.sendSlice(buffer.items, .{});
         try head.process(t.allocator);
 
         _ = try nerve.recvMsg(&message, .{});
         try t.expect(!message.more());
-        try t.expectEqual(
-            Response{ .ping = .success },
-            try Response.parse(message.slice()),
-        );
+        var response = try Response.parse(t.allocator, message.slice());
+        defer response.deinit(t.allocator);
+        try t.expectEqual(Response{ .ping = .success }, response);
     }
 }
 
@@ -519,11 +514,23 @@ pub const Member = struct {
     }
 };
 
+const GetRequestError = zimq.Socket.RecvMsgError || mzg.UnpackError;
+/// This function returns a tuple whose 1st element is the header and the 2nd
+/// element is the body
+fn getRequest(self: *Head) GetRequestError!struct { []const u8, []const u8 } {
+    _ = try self.head.recvMsg(&self.message, .{});
+
+    var header: []const u8 = undefined;
+    const consumed = try mzg.unpack(self.message.slice(), &header);
+
+    return .{ header, self.message.slice()[consumed..] };
+}
+
 const std = @import("std");
 const StringArrayHashMapUnmanaged = std.StringArrayHashMapUnmanaged;
 const Allocator = std.mem.Allocator;
 const ArrayListUnmanaged = std.ArrayListUnmanaged;
-const startsWith = std.mem.startsWith;
+const eql = std.mem.eql;
 const ns_per_s = std.time.ns_per_s;
 const ns_per_ms = std.time.ns_per_ms;
 const Instant = std.time.Instant;

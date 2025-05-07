@@ -30,7 +30,7 @@ pub fn sendPing(self: *Nerve, allocator: Allocator, name: []const u8) SendError!
     self.buffer.clearRetainingCapacity();
 
     const writer = self.buffer.writer(allocator);
-    try writer.writeAll("ping");
+    try mzg.pack("ping", writer);
     try mzg.pack(name, writer);
 
     try self.head.sendSlice(self.buffer.items, .{});
@@ -46,7 +46,7 @@ pub fn sendJoin(
     self.buffer.clearRetainingCapacity();
 
     const writer = self.buffer.writer(allocator);
-    try writer.writeAll("join");
+    try mzg.pack("join", writer);
     try mzg.pack(
         .{ name, ping_interval, packMap(&endpoints) },
         writer,
@@ -59,17 +59,17 @@ pub fn sendDown(self: *Nerve, allocator: Allocator, name: []const u8) SendError!
     self.buffer.clearRetainingCapacity();
 
     const writer = self.buffer.writer(allocator);
-    try writer.writeAll("down");
+    try mzg.pack("down", writer);
     try mzg.pack(name, writer);
 
     try self.head.sendSlice(self.buffer.items, .{});
 }
 
 pub const ResponseError = zimq.Socket.RecvMsgError || Response.Error;
-pub fn getHeadReponse(self: *Nerve) ResponseError!Response {
+pub fn getResponse(self: *Nerve, allocator: Allocator) ResponseError!Response {
     _ = try self.head.recvMsg(&self.message, .{});
 
-    return Response.parse(self.message.slice());
+    return Response.parse(allocator, self.message.slice());
 }
 
 test sendJoin {
@@ -98,13 +98,14 @@ test sendJoin {
 
     _ = try head.recvMsg(&message, .{});
     try t.expectEqualStrings(
-        "join\x93\xA3led\xCE\x77\x35\x94\x00\x81\xA3led\xABinproc://#2",
+        "\xA4join\x93\xA3led\xCE\x77\x35\x94\x00\x81\xA3led\xABinproc://#2",
         message.slice(),
     );
     try t.expect(!message.more());
 
-    try head.sendConstSlice("join\x00", .{});
-    const response = try nerve.getHeadReponse();
+    try head.sendConstSlice("\xA4join\x00", .{});
+    var response = try nerve.getResponse(t.allocator);
+    defer response.deinit(t.allocator);
     try t.expectEqual(Response{ .join = .success }, response);
 }
 
@@ -128,11 +129,12 @@ test sendPing {
     try nerve.sendPing(t.allocator, "led");
 
     _ = try head.recvMsg(&message, .{});
-    try t.expectEqualStrings("ping\xA3led", message.slice());
+    try t.expectEqualStrings("\xA4ping\xA3led", message.slice());
     try t.expect(!message.more());
 
-    try head.sendConstSlice("ping\x00", .{});
-    const response = try nerve.getHeadReponse();
+    try head.sendConstSlice("\xA4ping\x00", .{});
+    var response = try nerve.getResponse(t.allocator);
+    defer response.deinit(t.allocator);
     try t.expectEqual(Response{ .ping = .success }, response);
 }
 
@@ -156,11 +158,12 @@ test sendDown {
     try nerve.sendDown(t.allocator, "led");
 
     _ = try head.recvMsg(&message, .{});
-    try t.expectEqualStrings("down\xA3led", message.slice());
+    try t.expectEqualStrings("\xA4down\xA3led", message.slice());
     try t.expect(!message.more());
 
-    try head.sendConstSlice("down\x00", .{});
-    const response = try nerve.getHeadReponse();
+    try head.sendConstSlice("\xA4down\x00", .{});
+    var response = try nerve.getResponse(t.allocator);
+    defer response.deinit(t.allocator);
     try t.expectEqual(Response{ .down = .success }, response);
 }
 

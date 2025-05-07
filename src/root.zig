@@ -19,9 +19,9 @@ pub const Nerve = @import("Nerve.zig");
 comptime {
     const t = @import("std").testing;
 
-    t.refAllDeclsRecursive(source);
-    t.refAllDeclsRecursive(sink);
-    t.refAllDeclsRecursive(Response);
-    t.refAllDeclsRecursive(Head);
-    t.refAllDeclsRecursive(Nerve);
+    t.refAllDecls(source);
+    t.refAllDecls(sink);
+    t.refAllDecls(response);
+    t.refAllDecls(Head);
+    t.refAllDecls(Nerve);
 }
