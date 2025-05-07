@@ -138,8 +138,15 @@ fn processDown(
     var name: []const u8 = undefined;
     _ = try mzg.unpack(slice, &name);
 
-    const result: Down =
-        if (self.removeByName(allocator, name)) .success else .absence;
+    const result: Down = blk: {
+        var entry = self.members.fetchSwapRemove(name);
+        if (entry) |*kv| {
+            kv.value.deinit(allocator);
+            break :blk .success;
+        } else {
+            break :blk .absence;
+        }
+    };
 
     self.buffer.clearRetainingCapacity();
     const writer = self.buffer.writer(allocator);
@@ -181,14 +188,7 @@ pub fn checkMembers(self: *Head, allocator: Allocator) CheckError!void {
     }
 }
 
-fn removeByName(self: *Head, allocator: Allocator, name: []const u8) bool {
-    var entry = self.members.fetchSwapRemove(name);
-    if (entry) |*kv| {
-        kv.value.deinit(allocator);
 
-        return true;
-    }
-    return false;
 }
 
 const GetRequestError = zimq.Socket.RecvMsgError || mzg.UnpackError;
@@ -233,7 +233,7 @@ pub const Registration = struct {
             self.out.endpoints = .empty;
             consumed += try mzg.unpack(
                 buffer[consumed..],
-                unpackMap(self.allocator, &self.out.endpoints, .@"error"),
+                adapter.unpackMap(self.allocator, &self.out.endpoints, .@"error"),
             );
 
             return consumed;
@@ -281,7 +281,7 @@ test processJoin {
     const writer = buffer.writer(t.allocator);
     try mzg.pack("join", writer);
     try mzg.pack(
-        .{ "test", 1 * ns_per_s, packMap(&StringArrayHashMapUnmanaged(u8).empty) },
+        .{ "test", 1 * ns_per_s, adapter.packMap(&StringArrayHashMapUnmanaged(u8).empty) },
         writer,
     );
     try nerve.sendSlice(buffer.items, .{});
@@ -344,7 +344,11 @@ test processPulse {
         const writer = buffer.writer(t.allocator);
         try mzg.pack("join", writer);
         try mzg.pack(
-            .{ "test", 1 * ns_per_s, packMap(&StringArrayHashMapUnmanaged(u8).empty) },
+            .{
+                "test",
+                1 * ns_per_s,
+                adapter.packMap(&StringArrayHashMapUnmanaged(u8).empty),
+            },
             writer,
         );
         try nerve.sendSlice(buffer.items, .{});
@@ -412,7 +416,11 @@ test processDown {
         const writer = buffer.writer(t.allocator);
         try mzg.pack("join", writer);
         try mzg.pack(
-            .{ "test", 1 * ns_per_s, packMap(&StringArrayHashMapUnmanaged(u8).empty) },
+            .{
+                "test",
+                1 * ns_per_s,
+                adapter.packMap(&StringArrayHashMapUnmanaged(u8).empty),
+            },
             writer,
         );
         try nerve.sendSlice(buffer.items, .{});
@@ -496,7 +504,11 @@ test checkMembers {
         const writer = buffer.writer(t.allocator);
         try mzg.pack("join", writer);
         try mzg.pack(
-            .{ "test1", 10 * ns_per_ms, packMap(&StringArrayHashMapUnmanaged(u8).empty) },
+            .{
+                "test1",
+                10 * ns_per_ms,
+                adapter.packMap(&StringArrayHashMapUnmanaged(u8).empty),
+            },
             writer,
         );
         try nerve.sendSlice(buffer.items, .{});
@@ -509,7 +521,11 @@ test checkMembers {
         const writer = buffer.writer(t.allocator);
         try mzg.pack("join", writer);
         try mzg.pack(
-            .{ "test2", 10 * ns_per_s, packMap(&StringArrayHashMapUnmanaged(u8).empty) },
+            .{
+                "test2",
+                10 * ns_per_s,
+                adapter.packMap(&StringArrayHashMapUnmanaged(u8).empty),
+            },
             writer,
         );
         try nerve.sendSlice(buffer.items, .{});
@@ -580,11 +596,9 @@ const Instant = std.time.Instant;
 const zimq = @import("zimq");
 
 const mzg = @import("mzg");
-const packMap = mzg.adapter.packMap;
-const unpackMap = mzg.adapter.unpackMap;
+const adapter = mzg.adapter;
 
 const zic = @import("root.zig");
-
 const Resp = zic.Resp;
 const Join = zic.Join;
 const Pulse = zic.Pulse;
