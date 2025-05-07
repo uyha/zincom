@@ -46,7 +46,7 @@ pub fn deinit(self: *Head, allocator: Allocator) void {
 }
 
 pub const ProcessError = zimq.Socket.RecvMsgError || zimq.Socket.SendError || mzg.UnpackError || error{ HeaderInvalid, Unsupported };
-pub fn process(self: *Head, allocator: Allocator) ProcessError!void {
+pub fn processHead(self: *Head, allocator: Allocator) ProcessError!void {
     const header, const body = try self.getRequest();
 
     if (eql(u8, header, "join")) {
@@ -286,7 +286,7 @@ test processJoin {
     );
     try nerve.sendSlice(buffer.items, .{});
 
-    try head.process(t.allocator);
+    try head.processHead(t.allocator);
 
     const member = head.members.get("test");
     try t.expect(member != null);
@@ -305,7 +305,7 @@ test processJoin {
 
     // Joining again should fail with `duplicate` returned
     try nerve.sendSlice(buffer.items, .{});
-    try head.process(t.allocator);
+    try head.processHead(t.allocator);
 
     _ = try nerve.recvMsg(&message, .{});
     try t.expect(!message.more());
@@ -348,7 +348,7 @@ test processPing {
             writer,
         );
         try nerve.sendSlice(buffer.items, .{});
-        try head.process(t.allocator);
+        try head.processHead(t.allocator);
         _ = try nerve.recvMsg(&message, .{});
     }
 
@@ -359,7 +359,7 @@ test processPing {
         try mzg.pack("ping", writer);
         try mzg.pack("test", writer);
         try nerve.sendSlice(buffer.items, .{});
-        try head.process(t.allocator);
+        try head.processHead(t.allocator);
 
         _ = try nerve.recvMsg(&message, .{});
         try t.expect(!message.more());
@@ -375,7 +375,7 @@ test processPing {
         try mzg.pack("ping", writer);
         try mzg.pack("asdf", writer);
         try nerve.sendSlice(buffer.items, .{});
-        try head.process(t.allocator);
+        try head.processHead(t.allocator);
 
         _ = try nerve.recvMsg(&message, .{});
         try t.expect(!message.more());
@@ -416,7 +416,7 @@ test processDown {
             writer,
         );
         try nerve.sendSlice(buffer.items, .{});
-        try head.process(t.allocator);
+        try head.processHead(t.allocator);
         _ = try nerve.recvMsg(&message, .{});
     }
 
@@ -427,7 +427,7 @@ test processDown {
         try mzg.pack("down", writer);
         try mzg.pack("test", writer);
         try nerve.sendSlice(buffer.items, .{});
-        try head.process(t.allocator);
+        try head.processHead(t.allocator);
 
         _ = try nerve.recvMsg(&message, .{});
         try t.expect(!message.more());
@@ -443,7 +443,7 @@ test processDown {
         try mzg.pack("ping", writer);
         try mzg.pack("asdf", writer);
         try nerve.sendSlice(buffer.items, .{});
-        try head.process(t.allocator);
+        try head.processHead(t.allocator);
 
         _ = try nerve.recvMsg(&message, .{});
         try t.expect(!message.more());
@@ -459,7 +459,7 @@ test processDown {
         try mzg.pack("down", writer);
         try mzg.pack("test", writer);
         try nerve.sendSlice(buffer.items, .{});
-        try head.process(t.allocator);
+        try head.processHead(t.allocator);
 
         _ = try nerve.recvMsg(&message, .{});
         try t.expect(!message.more());
@@ -500,7 +500,7 @@ test checkMembers {
             writer,
         );
         try nerve.sendSlice(buffer.items, .{});
-        try head.process(t.allocator);
+        try head.processHead(t.allocator);
         _ = try nerve.recvMsg(&message, .{});
     }
     {
@@ -513,7 +513,7 @@ test checkMembers {
             writer,
         );
         try nerve.sendSlice(buffer.items, .{});
-        try head.process(t.allocator);
+        try head.processHead(t.allocator);
         _ = try nerve.recvMsg(&message, .{});
     }
 
@@ -532,7 +532,7 @@ test checkMembers {
         try mzg.pack("ping", writer);
         try mzg.pack("test1", writer);
         try nerve.sendSlice(buffer.items, .{});
-        try head.process(t.allocator);
+        try head.processHead(t.allocator);
 
         _ = try nerve.recvMsg(&message, .{});
         try t.expect(!message.more());
@@ -547,7 +547,7 @@ test checkMembers {
         try mzg.pack("ping", writer);
         try mzg.pack("test2", writer);
         try nerve.sendSlice(buffer.items, .{});
-        try head.process(t.allocator);
+        try head.processHead(t.allocator);
 
         _ = try nerve.recvMsg(&message, .{});
         try t.expect(!message.more());

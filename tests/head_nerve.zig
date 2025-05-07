@@ -20,7 +20,7 @@ test "Head and Nerve join" {
                 &.{ "hello", "inproc://#1/hello" },
             },
         ));
-        try head.process(allocator);
+        try head.processHead(allocator);
 
         const response = try nerve.getResponse(allocator);
         try t.expectEqual(zic.Resp{ .join = .success }, response);
@@ -32,7 +32,7 @@ test "Head and Nerve join" {
                 &.{ "hello", "inproc://#1/hello" },
             },
         ));
-        try head.process(allocator);
+        try head.processHead(allocator);
 
         const response = try nerve.getResponse(allocator);
         try t.expectEqual(zic.Resp{ .join = .duplicate }, response);
@@ -60,12 +60,12 @@ test "Head and Nerve down" {
             &.{ "hello", "inproc://#1/hello" },
         },
     ));
-    try head.process(allocator);
+    try head.processHead(allocator);
     _ = try nerve.getResponse(allocator);
 
     {
         try nerve.sendDown(allocator, "test");
-        try head.process(allocator);
+        try head.processHead(allocator);
 
         const response = try nerve.getResponse(allocator);
         try t.expectEqual(zic.Resp{ .down = .success }, response);
@@ -73,7 +73,7 @@ test "Head and Nerve down" {
 
     {
         try nerve.sendPing(allocator, "test");
-        try head.process(allocator);
+        try head.processHead(allocator);
 
         const response = try nerve.getResponse(allocator);
         try t.expectEqual(zic.Resp{ .ping = .absence }, response);
@@ -81,7 +81,7 @@ test "Head and Nerve down" {
 
     {
         try nerve.sendDown(allocator, "test");
-        try head.process(allocator);
+        try head.processHead(allocator);
 
         const response = try nerve.getResponse(allocator);
         try t.expectEqual(zic.Resp{ .down = .absence }, response);
@@ -89,7 +89,7 @@ test "Head and Nerve down" {
 
     {
         try nerve.sendDown(allocator, "nopenoneverexists");
-        try head.process(allocator);
+        try head.processHead(allocator);
 
         const response = try nerve.getResponse(allocator);
         try t.expectEqual(zic.Resp{ .down = .absence }, response);
@@ -117,7 +117,7 @@ test "Head and Nerve checkMembers" {
             &.{ "hello", "inproc://#1/hello" },
         },
     ));
-    try head.process(allocator);
+    try head.processHead(allocator);
     _ = try nerve.getResponse(allocator);
 
     {
@@ -125,7 +125,7 @@ test "Head and Nerve checkMembers" {
         try head.checkMembers(allocator);
 
         try nerve.sendPing(allocator, "test");
-        try head.process(allocator);
+        try head.processHead(allocator);
 
         const response = try nerve.getResponse(allocator);
         try t.expectEqual(zic.Resp{ .ping = .success }, response);
@@ -136,7 +136,7 @@ test "Head and Nerve checkMembers" {
         try head.checkMembers(allocator);
 
         try nerve.sendPing(allocator, "test");
-        try head.process(allocator);
+        try head.processHead(allocator);
 
         const response = try nerve.getResponse(allocator);
         try t.expectEqual(zic.Resp{ .ping = .absence }, response);
