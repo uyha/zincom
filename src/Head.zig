@@ -43,6 +43,9 @@ pub fn process(self: *Head, allocator: Allocator) ProcessError!void {
     if (eql(u8, header, "down")) {
         return self.processDown(allocator, body);
     }
+    if (eql(u8, header, "query")) {
+        return self.processQuery(allocator, body);
+    }
 
     return ProcessError.HeaderInvalid;
 }
@@ -124,9 +127,9 @@ test processJoin {
     try t.expect(!message.more());
 
     {
-        var response = try Response.parse(t.allocator, message.slice());
+        var response = try Resp.parse(t.allocator, message.slice());
         defer response.deinit(t.allocator);
-        try t.expectEqual(Response{ .join = .success }, response);
+        try t.expectEqual(Resp{ .join = .success }, response);
     }
 
     // Joining again should fail with `duplicate` returned
@@ -137,9 +140,9 @@ test processJoin {
     try t.expect(!message.more());
 
     {
-        var response = try Response.parse(t.allocator, message.slice());
+        var response = try Resp.parse(t.allocator, message.slice());
         defer response.deinit(t.allocator);
-        try t.expectEqual(Response{ .join = .duplicate }, response);
+        try t.expectEqual(Resp{ .join = .duplicate }, response);
     }
 }
 
@@ -211,9 +214,9 @@ test processPing {
 
         _ = try nerve.recvMsg(&message, .{});
         try t.expect(!message.more());
-        var response = try Response.parse(t.allocator, message.slice());
+        var response = try Resp.parse(t.allocator, message.slice());
         defer response.deinit(t.allocator);
-        try t.expectEqual(Response{ .ping = .success }, response);
+        try t.expectEqual(Resp{ .ping = .success }, response);
     }
 
     {
@@ -227,9 +230,9 @@ test processPing {
 
         _ = try nerve.recvMsg(&message, .{});
         try t.expect(!message.more());
-        var response = try Response.parse(t.allocator, message.slice());
+        var response = try Resp.parse(t.allocator, message.slice());
         defer response.deinit(t.allocator);
-        try t.expectEqual(Response{ .ping = .absence }, response);
+        try t.expectEqual(Resp{ .ping = .absence }, response);
     }
 }
 
@@ -295,9 +298,9 @@ test processDown {
 
         _ = try nerve.recvMsg(&message, .{});
         try t.expect(!message.more());
-        var response = try Response.parse(t.allocator, message.slice());
+        var response = try Resp.parse(t.allocator, message.slice());
         defer response.deinit(t.allocator);
-        try t.expectEqual(Response{ .down = .success }, response);
+        try t.expectEqual(Resp{ .down = .success }, response);
     }
 
     {
@@ -311,9 +314,9 @@ test processDown {
 
         _ = try nerve.recvMsg(&message, .{});
         try t.expect(!message.more());
-        var response = try Response.parse(t.allocator, message.slice());
+        var response = try Resp.parse(t.allocator, message.slice());
         defer response.deinit(t.allocator);
-        try t.expectEqual(Response{ .ping = .absence }, response);
+        try t.expectEqual(Resp{ .ping = .absence }, response);
     }
 
     {
@@ -327,9 +330,26 @@ test processDown {
 
         _ = try nerve.recvMsg(&message, .{});
         try t.expect(!message.more());
-        var response = try Response.parse(t.allocator, message.slice());
+        var response = try Resp.parse(t.allocator, message.slice());
         defer response.deinit(t.allocator);
-        try t.expectEqual(Response{ .down = .absence }, response);
+        try t.expectEqual(Resp{ .down = .absence }, response);
+    }
+}
+
+fn processQuery(
+    self: *Head,
+    allocator: Allocator,
+    slice: []const u8,
+) ProcessError!void {
+    var name: []const u8 = undefined;
+    _ = try mzg.unpack(slice, &name);
+
+    self.buffer.clearRetainingCapacity();
+    const writer = self.buffer.writer(allocator);
+
+    if (self.members.get(name)) |member| {
+        try mzg.pack("query", writer);
+        _ = member;
     }
 }
 
@@ -423,9 +443,9 @@ test checkMembers {
 
         _ = try nerve.recvMsg(&message, .{});
         try t.expect(!message.more());
-        var response = try Response.parse(t.allocator, message.slice());
+        var response = try Resp.parse(t.allocator, message.slice());
         defer response.deinit(t.allocator);
-        try t.expectEqual(Response{ .ping = .absence }, response);
+        try t.expectEqual(Resp{ .ping = .absence }, response);
     }
     {
         defer buffer.clearRetainingCapacity();
@@ -438,9 +458,9 @@ test checkMembers {
 
         _ = try nerve.recvMsg(&message, .{});
         try t.expect(!message.more());
-        var response = try Response.parse(t.allocator, message.slice());
+        var response = try Resp.parse(t.allocator, message.slice());
         defer response.deinit(t.allocator);
-        try t.expectEqual(Response{ .ping = .success }, response);
+        try t.expectEqual(Resp{ .ping = .success }, response);
     }
 }
 
@@ -540,7 +560,7 @@ const unpackMap = mzg.adapter.unpackMap;
 
 const zic = @import("root.zig");
 
-const Response = zic.Response;
-const Join = Response.Join;
-const Ping = Response.Ping;
-const Down = Response.Down;
+const Resp = zic.Resp;
+const Join = zic.Join;
+const Ping = zic.Ping;
+const Down = zic.Down;

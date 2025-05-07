@@ -178,4 +178,4 @@ const packMap = mzg.adapter.packMap;
 
 const zic = @import("root.zig");
 const consumeAll = zic.consumeAll;
-const Response = zic.Response;
+const Response = zic.Resp;

@@ -10,8 +10,12 @@ pub const Source = source.Source;
 const sink = @import("sink.zig");
 pub const Sink = source.Sink;
 
-const response = @import("response.zig");
-pub const Response = response.Response;
+const resp = @import("resp.zig");
+pub const Join = resp.Join;
+pub const Ping = resp.Ping;
+pub const Down = resp.Down;
+pub const Query = resp.Query;
+pub const Resp = resp.Resp;
 
 pub const Head = @import("Head.zig");
 pub const Nerve = @import("Nerve.zig");
@@ -21,7 +25,7 @@ comptime {
 
     t.refAllDecls(source);
     t.refAllDecls(sink);
-    t.refAllDecls(response);
+    t.refAllDecls(resp);
     t.refAllDecls(Head);
     t.refAllDecls(Nerve);
 }
