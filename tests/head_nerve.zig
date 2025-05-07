@@ -4,7 +4,11 @@ test "Head and Nerve join" {
     var context: *zimq.Context = try .init();
     defer context.deinit();
 
-    var head: zic.Head = try .init(context, "inproc://#1/head");
+    var head: zic.Head = try .init(context, .{
+        .head = "inproc://#1/head",
+        .noti = "inproc://#1/noti",
+        .ping = "inproc://#1/ping",
+    });
     defer head.deinit(allocator);
 
     var nerve: zic.Nerve = try .init(context, "inproc://#1/head");
@@ -41,7 +45,11 @@ test "Head and Nerve down" {
     var context: *zimq.Context = try .init();
     defer context.deinit();
 
-    var head: zic.Head = try .init(context, "inproc://#1/head");
+    var head: zic.Head = try .init(context, .{
+        .head = "inproc://#1/head",
+        .noti = "inproc://#1/noti",
+        .ping = "inproc://#1/ping",
+    });
     defer head.deinit(allocator);
 
     var nerve: zic.Nerve = try .init(context, "inproc://#1/head");
@@ -94,7 +102,11 @@ test "Head and Nerve checkMembers" {
     var context: *zimq.Context = try .init();
     defer context.deinit();
 
-    var head: zic.Head = try .init(context, "inproc://#1/head");
+    var head: zic.Head = try .init(context, .{
+        .head = "inproc://#1/head",
+        .noti = "inproc://#1/noti",
+        .ping = "inproc://#1/ping",
+    });
     defer head.deinit(allocator);
 
     var nerve: zic.Nerve = try .init(context, "inproc://#1/head");

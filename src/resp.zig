@@ -36,14 +36,15 @@ pub const Query = union(enum) {
         allocator: Allocator,
         out: *Query,
 
-        pub fn mzgUnpack(self: *const Query.MzgUnpacker, buffer: []const u8) mzg.UnpackError!usize {
+        pub fn mzgUnpack(
+            self: *const Query.MzgUnpacker,
+            buffer: []const u8,
+        ) mzg.UnpackError!usize {
             var len: usize = undefined;
             var consumed = try mzg.unpackArray(buffer, &len);
 
-            switch (len) {
-                1 => {},
-                2 => {},
-                else => return mzg.UnpackError.TypeIncompatible,
+            if (len != 1 and len != 2) {
+                return mzg.UnpackError.TypeIncompatible;
             }
 
             var tag: Tag(Query) = undefined;
