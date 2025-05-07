@@ -90,6 +90,158 @@ fn processJoin(
     try self.head.sendSlice(self.buffer.items, .{});
 }
 
+fn processPing(
+    self: *Head,
+    allocator: Allocator,
+    slice: []const u8,
+) ProcessError!void {
+    var name: []const u8 = undefined;
+    _ = try mzg.unpack(slice, &name);
+
+    const result: Ping = blk: {
+        if (self.members.getEntry(name)) |entry| {
+            entry.value_ptr.last_ping = try .now();
+            break :blk Ping.success;
+        } else {
+            break :blk Ping.absence;
+        }
+    };
+
+    self.buffer.clearRetainingCapacity();
+    const writer = self.buffer.writer(allocator);
+    try mzg.pack("ping", writer);
+    try mzg.pack(result, writer);
+
+    try self.head.sendSlice(self.buffer.items, .{});
+}
+
+fn processDown(
+    self: *Head,
+    allocator: Allocator,
+    slice: []const u8,
+) ProcessError!void {
+    var name: []const u8 = undefined;
+    _ = try mzg.unpack(slice, &name);
+
+    const result: Down =
+        if (self.removeByName(allocator, name)) .success else .absence;
+
+    self.buffer.clearRetainingCapacity();
+    const writer = self.buffer.writer(allocator);
+    try mzg.pack("down", writer);
+    try mzg.pack(result, writer);
+
+    try self.head.sendSlice(self.buffer.items, .{});
+}
+
+fn processQuery(
+    self: *Head,
+    allocator: Allocator,
+    slice: []const u8,
+) ProcessError!void {
+    var name: []const u8 = undefined;
+    _ = try mzg.unpack(slice, &name);
+
+    self.buffer.clearRetainingCapacity();
+    const writer = self.buffer.writer(allocator);
+
+    if (self.members.get(name)) |member| {
+        try mzg.pack("query", writer);
+        _ = member;
+    }
+}
+pub const CheckError = error{Unsupported};
+pub fn checkMembers(self: *Head, allocator: Allocator) CheckError!void {
+    const now: Instant = try .now();
+
+    var i: usize = 0;
+    while (i < self.members.count()) {
+        var member = self.members.entries.get(i).value;
+        if (now.since(member.last_ping) <= member.interval) {
+            i += 1;
+            continue;
+        }
+        member.deinit(allocator);
+        self.members.swapRemoveAt(i);
+    }
+}
+
+fn removeByName(self: *Head, allocator: Allocator, name: []const u8) bool {
+    var entry = self.members.fetchSwapRemove(name);
+    if (entry) |*kv| {
+        kv.value.deinit(allocator);
+
+        return true;
+    }
+    return false;
+}
+
+const GetRequestError = zimq.Socket.RecvMsgError || mzg.UnpackError;
+/// This function returns a tuple whose 1st element is the header and the 2nd
+/// element is the body
+fn getRequest(self: *Head) GetRequestError!struct { []const u8, []const u8 } {
+    _ = try self.head.recvMsg(&self.message, .{});
+
+    var header: []const u8 = undefined;
+    const consumed = try mzg.unpack(self.message.slice(), &header);
+
+    return .{ header, self.message.slice()[consumed..] };
+}
+
+pub const Registration = struct {
+    name: []const u8,
+    interval: u64,
+    endpoints: StringArrayHashMapUnmanaged([]const u8) = .empty,
+
+    pub fn deinit(self: *Registration, allocator: Allocator) void {
+        self.endpoints.deinit(allocator);
+    }
+
+    pub const Unpacker = struct {
+        allocator: Allocator,
+        out: *Registration,
+
+        pub fn init(allocator: Allocator, out: *Registration) Unpacker {
+            return .{ .allocator = allocator, .out = out };
+        }
+
+        pub fn mzgUnpack(self: *const Unpacker, buffer: []const u8) mzg.UnpackError!usize {
+            var len: usize = undefined;
+            var consumed: usize = try mzg.unpackArray(buffer, &len);
+
+            if (len != 3) {
+                return mzg.UnpackError.TypeIncompatible;
+            }
+
+            consumed += try mzg.unpack(buffer[consumed..], &self.out.name);
+            consumed += try mzg.unpack(buffer[consumed..], &self.out.interval);
+            self.out.endpoints = .empty;
+            consumed += try mzg.unpack(
+                buffer[consumed..],
+                unpackMap(self.allocator, &self.out.endpoints, .@"error"),
+            );
+
+            return consumed;
+        }
+    };
+
+    pub fn mzgUnpacker(self: *Registration, allocator: Allocator) Unpacker {
+        return .init(allocator, self);
+    }
+};
+pub const Member = struct {
+    name: []const u8,
+    interval: u64,
+    last_ping: Instant,
+    endpoints: StringArrayHashMapUnmanaged([]const u8),
+    raw: ArrayListUnmanaged(u8),
+
+    pub fn deinit(self: *Member, allocator: Allocator) void {
+        self.endpoints.deinit(allocator);
+        self.raw.deinit(allocator);
+    }
+};
+
 test processJoin {
     const t = std.testing;
 
@@ -145,32 +297,6 @@ test processJoin {
         try t.expectEqual(Resp{ .join = .duplicate }, response);
     }
 }
-
-fn processPing(
-    self: *Head,
-    allocator: Allocator,
-    slice: []const u8,
-) ProcessError!void {
-    var name: []const u8 = undefined;
-    _ = try mzg.unpack(slice, &name);
-
-    const result: Ping = blk: {
-        if (self.members.getEntry(name)) |entry| {
-            entry.value_ptr.last_ping = try .now();
-            break :blk Ping.success;
-        } else {
-            break :blk Ping.absence;
-        }
-    };
-
-    self.buffer.clearRetainingCapacity();
-    const writer = self.buffer.writer(allocator);
-    try mzg.pack("ping", writer);
-    try mzg.pack(result, writer);
-
-    try self.head.sendSlice(self.buffer.items, .{});
-}
-
 test processPing {
     const t = std.testing;
 
@@ -235,26 +361,6 @@ test processPing {
         try t.expectEqual(Resp{ .ping = .absence }, response);
     }
 }
-
-fn processDown(
-    self: *Head,
-    allocator: Allocator,
-    slice: []const u8,
-) ProcessError!void {
-    var name: []const u8 = undefined;
-    _ = try mzg.unpack(slice, &name);
-
-    const result: Down =
-        if (self.removeByName(allocator, name)) .success else .absence;
-
-    self.buffer.clearRetainingCapacity();
-    const writer = self.buffer.writer(allocator);
-    try mzg.pack("down", writer);
-    try mzg.pack(result, writer);
-
-    try self.head.sendSlice(self.buffer.items, .{});
-}
-
 test processDown {
     const t = std.testing;
 
@@ -335,50 +441,6 @@ test processDown {
         try t.expectEqual(Resp{ .down = .absence }, response);
     }
 }
-
-fn processQuery(
-    self: *Head,
-    allocator: Allocator,
-    slice: []const u8,
-) ProcessError!void {
-    var name: []const u8 = undefined;
-    _ = try mzg.unpack(slice, &name);
-
-    self.buffer.clearRetainingCapacity();
-    const writer = self.buffer.writer(allocator);
-
-    if (self.members.get(name)) |member| {
-        try mzg.pack("query", writer);
-        _ = member;
-    }
-}
-
-pub const CheckError = error{Unsupported};
-pub fn checkMembers(self: *Head, allocator: Allocator) CheckError!void {
-    const now: Instant = try .now();
-
-    var i: usize = 0;
-    while (i < self.members.count()) {
-        var member = self.members.entries.get(i).value;
-        if (now.since(member.last_ping) <= member.interval) {
-            i += 1;
-            continue;
-        }
-        member.deinit(allocator);
-        self.members.swapRemoveAt(i);
-    }
-}
-
-fn removeByName(self: *Head, allocator: Allocator, name: []const u8) bool {
-    var entry = self.members.fetchSwapRemove(name);
-    if (entry) |*kv| {
-        kv.value.deinit(allocator);
-
-        return true;
-    }
-    return false;
-}
-
 test checkMembers {
     const t = std.testing;
 
@@ -463,49 +525,6 @@ test checkMembers {
         try t.expectEqual(Resp{ .ping = .success }, response);
     }
 }
-
-pub const Registration = struct {
-    name: []const u8,
-    interval: u64,
-    endpoints: StringArrayHashMapUnmanaged([]const u8) = .empty,
-
-    pub fn deinit(self: *Registration, allocator: Allocator) void {
-        self.endpoints.deinit(allocator);
-    }
-
-    pub const Unpacker = struct {
-        allocator: Allocator,
-        out: *Registration,
-
-        pub fn init(allocator: Allocator, out: *Registration) Unpacker {
-            return .{ .allocator = allocator, .out = out };
-        }
-
-        pub fn mzgUnpack(self: *const Unpacker, buffer: []const u8) mzg.UnpackError!usize {
-            var len: usize = undefined;
-            var consumed: usize = try mzg.unpackArray(buffer, &len);
-
-            if (len != 3) {
-                return mzg.UnpackError.TypeIncompatible;
-            }
-
-            consumed += try mzg.unpack(buffer[consumed..], &self.out.name);
-            consumed += try mzg.unpack(buffer[consumed..], &self.out.interval);
-            self.out.endpoints = .empty;
-            consumed += try mzg.unpack(
-                buffer[consumed..],
-                unpackMap(self.allocator, &self.out.endpoints, .@"error"),
-            );
-
-            return consumed;
-        }
-    };
-
-    pub fn mzgUnpacker(self: *Registration, allocator: Allocator) Unpacker {
-        return .init(allocator, self);
-    }
-};
-
 test Registration {
     const t = std.testing;
 
@@ -516,31 +535,6 @@ test Registration {
     );
 
     try t.expectEqualStrings("test", registration.name);
-}
-
-pub const Member = struct {
-    name: []const u8,
-    interval: u64,
-    last_ping: Instant,
-    endpoints: StringArrayHashMapUnmanaged([]const u8),
-    raw: ArrayListUnmanaged(u8),
-
-    pub fn deinit(self: *Member, allocator: Allocator) void {
-        self.endpoints.deinit(allocator);
-        self.raw.deinit(allocator);
-    }
-};
-
-const GetRequestError = zimq.Socket.RecvMsgError || mzg.UnpackError;
-/// This function returns a tuple whose 1st element is the header and the 2nd
-/// element is the body
-fn getRequest(self: *Head) GetRequestError!struct { []const u8, []const u8 } {
-    _ = try self.head.recvMsg(&self.message, .{});
-
-    var header: []const u8 = undefined;
-    const consumed = try mzg.unpack(self.message.slice(), &header);
-
-    return .{ header, self.message.slice()[consumed..] };
 }
 
 const std = @import("std");
