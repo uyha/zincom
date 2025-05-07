@@ -5,16 +5,13 @@ buffer: ArrayListUnmanaged(u8) = .empty,
 message: zimq.Message,
 
 pub const InitError = zimq.Socket.InitError || zimq.Socket.ConnectError;
-pub const Endpoints = struct {
-    head: [:0]const u8,
-};
-pub fn init(context: *zimq.Context, endpoints: anytype) InitError!Nerve {
+pub fn init(context: *zimq.Context, endpoint: [:0]const u8) InitError!Nerve {
     const result: Nerve = .{
         .head = try .init(context, .req),
         .message = .empty(),
     };
 
-    try result.head.connect(endpoints.head);
+    try result.head.connect(endpoint);
 
     return result;
 }
@@ -24,7 +21,8 @@ pub fn deinit(self: *Nerve, allocator: Allocator) void {
     self.buffer.deinit(allocator);
 }
 
-pub const SendError = zimq.Socket.SendError || mzg.PackError(ArrayListUnmanaged(u8).Writer);
+pub const SendError =
+    zimq.Socket.SendError || mzg.PackError(ArrayListUnmanaged(u8).Writer);
 
 pub fn sendPing(self: *Nerve, allocator: Allocator, name: []const u8) SendError!void {
     self.buffer.clearRetainingCapacity();
@@ -86,7 +84,7 @@ test sendJoin {
 
     try head.bind("inproc://#1/head");
 
-    var nerve: Nerve = try .init(context, .{ .head = "inproc://#1/head" });
+    var nerve: Nerve = try .init(context, "inproc://#1/head");
     defer nerve.deinit(t.allocator);
 
     try nerve.sendJoin(
@@ -120,7 +118,7 @@ test sendPing {
 
     try head.bind("inproc://#1/head");
 
-    var nerve: Nerve = try .init(context, .{ .head = "inproc://#1/head" });
+    var nerve: Nerve = try .init(context, "inproc://#1/head");
     defer nerve.deinit(t.allocator);
 
     var message: zimq.Message = .empty();
@@ -149,7 +147,7 @@ test sendDown {
 
     try head.bind("inproc://#1/head");
 
-    var nerve: Nerve = try .init(context, .{ .head = "inproc://#1/head" });
+    var nerve: Nerve = try .init(context, "inproc://#1/head");
     defer nerve.deinit(t.allocator);
 
     var message: zimq.Message = .empty();

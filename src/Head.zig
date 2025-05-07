@@ -7,16 +7,13 @@ buffer: ArrayListUnmanaged(u8) = .empty,
 message: zimq.Message,
 
 pub const InitError = zimq.Socket.InitError || zimq.Socket.BindError;
-pub const Endpoints = struct {
-    head: [:0]const u8,
-};
-pub fn init(context: *zimq.Context, endpoints: Endpoints) InitError!Head {
+pub fn init(context: *zimq.Context, endpoint: [:0]const u8) InitError!Head {
     const result: Head = .{
         .head = try .init(context, .rep),
         .message = .empty(),
     };
 
-    try result.head.bind(endpoints.head);
+    try result.head.bind(endpoint);
 
     return result;
 }
@@ -96,7 +93,7 @@ test processJoin {
     var context: *zimq.Context = try .init();
     defer context.deinit();
 
-    var head: Head = try .init(context, .{ .head = "inproc://#1/head" });
+    var head: Head = try .init(context, "inproc://#1/head");
     defer head.deinit(t.allocator);
 
     var nerve: *zimq.Socket = try .init(context, .req);
@@ -177,7 +174,7 @@ test processPing {
     var context: *zimq.Context = try .init();
     defer context.deinit();
 
-    var head: Head = try .init(context, .{ .head = "inproc://#1/head" });
+    var head: Head = try .init(context, "inproc://#1/head");
     defer head.deinit(t.allocator);
 
     var nerve: *zimq.Socket = try .init(context, .req);
@@ -261,7 +258,7 @@ test processDown {
     var context: *zimq.Context = try .init();
     defer context.deinit();
 
-    var head: Head = try .init(context, .{ .head = "inproc://#1/head" });
+    var head: Head = try .init(context, "inproc://#1/head");
     defer head.deinit(t.allocator);
 
     var nerve: *zimq.Socket = try .init(context, .req);
@@ -368,7 +365,7 @@ test checkMembers {
     var context: *zimq.Context = try .init();
     defer context.deinit();
 
-    var head: Head = try .init(context, .{ .head = "inproc://#1/head" });
+    var head: Head = try .init(context, "inproc://#1/head");
     defer head.deinit(t.allocator);
 
     var nerve: *zimq.Socket = try .init(context, .req);
