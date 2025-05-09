@@ -9,8 +9,8 @@
             .hash = "zimq-0.0.0-nw1ioNiJAQDACt7j_iUlIXSoQJr8QFqiS8V8Xrm9E7iJ",
         },
         .mzg = .{
-            .url = "git+https://github.com/uyha/mzg.git?ref=v0.0.7#ce4c312ce1001d54457ce8fed82b755c2af32737",
-            .hash = "mzg-0.0.7-dgyD104nAQAzcmvAyfGzlHQVEjE6guCE8AT3G4bywKzH",
+            .url = "git+https://github.com/uyha/mzg.git?ref=v0.1.0#bd7702cd18f00438e827f6ab35197c77715c5c76",
+            .hash = "mzg-0.1.0-dgyD11dJAQDKxbGPpKhuz6B1LE27L6P8xlyzm8gpvnjo",
         },
     },
     .paths = .{

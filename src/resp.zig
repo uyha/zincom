@@ -11,63 +11,6 @@ pub const Query = union(enum) {
             else => {},
         }
     }
-
-    pub fn mzgPack(
-        self: *const Query,
-        writer: anytype,
-    ) mzg.PackError(@TypeOf(writer))!void {
-        switch (self.*) {
-            .endpoints => |*value| {
-                try mzg.packArray(2, writer);
-                try mzg.pack(activeTag(self.*));
-                try mzg.pack(adapter.packMap(value), writer);
-            },
-            else => {
-                try mzg.packArray(1, writer);
-                try mzg.pack(activeTag(self.*));
-            },
-        }
-    }
-
-    pub fn mzgUnpacker(self: *Query, allocator: Allocator) Query.MzgUnpacker {
-        return .{ .allocator = allocator, .out = self };
-    }
-    const MzgUnpacker = struct {
-        allocator: Allocator,
-        out: *Query,
-
-        pub fn mzgUnpack(
-            self: *const Query.MzgUnpacker,
-            buffer: []const u8,
-        ) mzg.UnpackError!usize {
-            var len: usize = undefined;
-            var consumed = try mzg.unpackArray(buffer, &len);
-
-            if (len != 1 and len != 2) {
-                return mzg.UnpackError.TypeIncompatible;
-            }
-
-            var tag: Tag(Query) = undefined;
-            consumed += try mzg.unpack(buffer[consumed..], &tag);
-
-            switch (tag) {
-                .endpoints => {
-                    self.out.* = .{ .endpoints = .empty };
-                    consumed += try mzg.unpack(
-                        buffer[consumed..],
-                        adapter.unpackMap(
-                            self.allocator,
-                            &self.out.endpoints,
-                            .@"error",
-                        ),
-                    );
-                },
-                .absence => self.out.* = .{ .absence = {} },
-            }
-
-            return consumed;
-        }
-    };
 };
 
 pub const Resp = union(enum) {
@@ -82,117 +25,43 @@ pub const Resp = union(enum) {
             else => {},
         }
     }
-
-    pub const Error = mzg.UnpackError || error{HeaderInvalid};
-    const MzgUnpacker = struct {
-        allocator: Allocator,
-        out: *Resp,
-
-        pub fn mzgUnpack(self: *const MzgUnpacker, buffer: []const u8) mzg.UnpackError!usize {
-            var header: []const u8 = undefined;
-            var consumed = try mzg.unpack(buffer, &header);
-
-            if (eql(u8, header, "join")) {
-                self.out.* = .{ .join = undefined };
-                consumed += try mzg.unpack(buffer[consumed..], &self.out.join);
-                return consumed;
-            }
-            if (eql(u8, header, "pulse")) {
-                self.out.* = .{ .pulse = undefined };
-                consumed += try mzg.unpack(buffer[consumed..], &self.out.pulse);
-                return consumed;
-            }
-            if (eql(u8, header, "down")) {
-                self.out.* = .{ .down = undefined };
-                consumed += try mzg.unpack(buffer[consumed..], &self.out.down);
-                return consumed;
-            }
-            if (eql(u8, header, "query")) {
-                self.out.* = .{ .query = undefined };
-                consumed += try mzg.unpack(
-                    buffer[consumed..],
-                    self.out.query.mzgUnpacker(self.allocator),
-                );
-                return consumed;
-            }
-
-            return mzg.UnpackError.TypeIncompatible;
-        }
-    };
-
-    pub fn parse(
-        allocator: Allocator,
-        buffer: []const u8,
-    ) mzg.UnpackError!Resp {
-        var result: Resp = undefined;
-        _ = try mzg.unpack(buffer, result.mzgUnpacker(allocator));
-        return result;
-    }
-    pub fn mzgUnpacker(self: *Resp, allocator: Allocator) MzgUnpacker {
-        return .{ .allocator = allocator, .out = self };
-    }
 };
 
 test Resp {
     const t = std.testing;
     const allocator = t.allocator;
 
-    try t.expectEqual(
-        Resp{ .join = .success },
-        try Resp.parse(t.allocator, "\xA4join\x00"),
-    );
-    try t.expectEqual(
-        Resp{ .join = .duplicate },
-        try Resp.parse(t.allocator, "\xA4join\x01"),
-    );
-    try t.expectEqual(
-        Resp{ .pulse = .success },
-        try Resp.parse(t.allocator, "\xA5pulse\x00"),
-    );
-    try t.expectEqual(
-        Resp{ .pulse = .absence },
-        try Resp.parse(t.allocator, "\xA5pulse\x01"),
-    );
-    try t.expectEqual(
-        Resp{ .down = .success },
-        try Resp.parse(t.allocator, "\xA4down\x00"),
-    );
-    try t.expectEqual(
-        Resp{ .down = .absence },
-        try Resp.parse(t.allocator, "\xA4down\x01"),
-    );
+    inline for (.{
+        .{ "\x92\x00\x00", Resp{ .join = .success } },
+        .{ "\x92\x00\x01", Resp{ .join = .duplicate } },
+        .{ "\x92\x01\x00", Resp{ .pulse = .success } },
+        .{ "\x92\x01\x01", Resp{ .pulse = .absence } },
+        .{ "\x92\x02\x00", Resp{ .down = .success } },
+        .{ "\x92\x02\x01", Resp{ .down = .absence } },
+        .{ "\x92\x03\x92\x01\xC0", Resp{ .query = .absence } },
+    }) |row| {
+        const raw, const expected = row;
 
-    try t.expectEqual(
-        Resp{ .query = .absence },
-        try Resp.parse(t.allocator, "\xA5query\x91\x01"),
-    );
+        var actual: Resp = undefined;
+        try t.expectEqual(raw.len, try zic.unpackAllocate(allocator, raw, &actual));
+        try t.expectEqual(expected, actual);
+    }
+
     {
-        var expected = Resp{
-            .query = .{ .endpoints = try .init(allocator, &.{"te"}, &.{"te"}) },
-        };
-        defer expected.deinit(allocator);
-
-        var actual = try Resp.parse(allocator, "\xA5query\x92\x00\x81\xA2te\xA2te");
+        var actual: Resp = undefined;
+        try t.expectEqual(11, try zic.unpackAllocate(
+            allocator,
+            "\x92\x03\x92\x00\x81\xA2te\xA2te",
+            &actual,
+        ));
         defer actual.deinit(allocator);
 
-        for (expected.query.endpoints.keys()) |key| {
-            try t.expect(actual.query.endpoints.contains(key));
-
-            try t.expectEqualStrings(
-                expected.query.endpoints.get(key).?,
-                actual.query.endpoints.get(key).?,
-            );
-        }
+        try t.expectEqualStrings("te", actual.query.endpoints.get("te").?);
     }
 }
 
 const std = @import("std");
 const StringArrayHashMapUnmanaged = std.StringArrayHashMapUnmanaged;
 const Allocator = std.mem.Allocator;
-const ArrayListUnmanaged = std.ArrayListUnmanaged;
-const eql = std.mem.eql;
-const activeTag = std.meta.activeTag;
-const Tag = std.meta.Tag;
 
-const mzg = @import("mzg");
-const adapter = mzg.adapter;
+const zic = @import("root.zig");

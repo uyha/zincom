@@ -82,7 +82,7 @@ pub fn Source(comptime TData: type) type {
 
             const writer = self.buffer.writer(allocator);
             try writer.writeAll("noti");
-            try mzg.pack(field, writer);
+            try zic.pack(field, writer);
 
             try self.noti.sendSlice(self.buffer.items, .{});
         }
@@ -92,7 +92,7 @@ pub fn Source(comptime TData: type) type {
 
             const writer = self.buffer.writer(allocator);
             try writer.writeAll("ping");
-            try mzg.pack(self.current, writer);
+            try zic.pack(self.current, writer);
 
             try self.noti.sendSlice(self.buffer.items, .{});
         }
@@ -169,7 +169,7 @@ test Source {
         try t.expectEqual(7, received);
         try t.expectEqualStrings("noti\x92\x02\x01", message.slice());
         var event: Event = undefined;
-        _ = try mzg.unpack(message.slice()[4..], &event);
+        _ = try zic.unpack(message.slice()[4..], &event);
         try t.expectEqual(Event{ .@"2" = 1 }, event);
         try t.expect(!message.more());
     }
@@ -180,7 +180,7 @@ const Allocator = std.mem.Allocator;
 
 const zimq = @import("zimq");
 const mzg = @import("mzg");
-const zincom = @import("root.zig");
+const zic = @import("root.zig");
 
-const consumeAll = zincom.consumeAll;
-const StructAsTaggedUnion = zincom.StructAsTaggedUnion;
+const consumeAll = zic.consumeAll;
+const StructAsTaggedUnion = zic.StructAsTaggedUnion;
