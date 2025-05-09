@@ -63,7 +63,7 @@ pub fn sendDown(self: *Nerve, allocator: Allocator, name: []const u8) SendError!
     try self.head.sendSlice(self.buffer.items, .{});
 }
 
-pub const ResponseError = zimq.Socket.RecvMsgError || Response.Error;
+pub const ResponseError = zimq.Socket.RecvMsgError || mzg.UnpackError;
 pub fn getResponse(self: *Nerve, allocator: Allocator) ResponseError!Response {
     _ = try self.head.recvMsg(&self.message, .{});
 

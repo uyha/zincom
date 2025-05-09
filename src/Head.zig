@@ -36,7 +36,7 @@ pub fn deinit(self: *Head, allocator: Allocator) void {
     self.noti.deinit();
     self.ping.deinit();
 
-    for (self.members.entries.items(.value)) |*value| {
+    for (self.members.values()) |*value| {
         value.deinit(allocator);
     }
     self.members.deinit(allocator);
@@ -45,132 +45,85 @@ pub fn deinit(self: *Head, allocator: Allocator) void {
     self.message.deinit();
 }
 
-pub const ProcessError = zimq.Socket.RecvMsgError || zimq.Socket.SendError || mzg.UnpackError || error{ HeaderInvalid, Unsupported };
+pub const ProcessError = zimq.Socket.RecvMsgError || zimq.Socket.SendError || mzg.UnpackError || Allocator.Error || error{ HeaderInvalid, Unsupported };
 pub fn processHead(self: *Head, allocator: Allocator) ProcessError!void {
-    const header, const body = try self.getRequest();
+    _ = try self.head.recvMsg(&self.message, .{});
 
-    if (eql(u8, header, "join")) {
-        return self.processJoin(allocator, body);
-    }
-    if (eql(u8, header, "pulse")) {
-        return self.processPulse(allocator, body);
-    }
-    if (eql(u8, header, "down")) {
-        return self.processDown(allocator, body);
-    }
-    if (eql(u8, header, "query")) {
-        return self.processQuery(allocator, body);
-    }
+    var req: Req = undefined;
+    _ = try zic.unpackAllocate(allocator, self.message.slice(), &req);
+    defer req.deinit(allocator);
 
-    return ProcessError.HeaderInvalid;
+    const resp = try switch (req) {
+        .join => |join| self.processJoin(allocator, join),
+        .pulse => |pulse| self.processPulse(pulse),
+        .down => |down| self.processDown(allocator, down),
+        .query => |query| self.processQuery(query),
+    };
+
+    self.buffer.clearRetainingCapacity();
+    const writer = self.buffer.writer(allocator);
+    try zic.pack(resp, writer);
+
+    try self.head.sendSlice(self.buffer.items, .{});
 }
 
 fn processJoin(
     self: *Head,
     allocator: Allocator,
-    slice: []const u8,
-) ProcessError!void {
-    var raw: ArrayListUnmanaged(u8) = .empty;
-    errdefer raw.deinit(allocator);
+    join: Req.Join,
+) ProcessError!Resp {
+    if (self.members.contains(join.name)) {
+        return Resp{ .join = .duplicate };
+    }
 
-    try raw.appendSlice(allocator, slice);
+    var member: Member = try .fromJoin(allocator, join, try .now());
+    errdefer member.deinit(allocator);
 
-    var registration: Registration = undefined;
-    _ = try mzg.unpack(raw.items, registration.mzgUnpacker(allocator));
-    errdefer registration.deinit(allocator);
+    try self.members.put(allocator, member.name, member);
 
-    const result: Join = result: {
-        if (self.members.contains(registration.name)) {
-            raw.deinit(allocator);
-            registration.deinit(allocator);
-            break :result Join.duplicate;
-        } else {
-            try self.members.put(allocator, registration.name, .{
-                .name = registration.name,
-                .interval = registration.interval,
-                .last_pulse = try .now(),
-                .endpoints = registration.endpoints,
-                .raw = raw,
-            });
-
-            break :result Join.success;
-        }
-    };
-
-    self.buffer.clearRetainingCapacity();
-    const writer = self.buffer.writer(allocator);
-    try mzg.pack("join", writer);
-    try mzg.pack(result, writer);
-
-    try self.head.sendSlice(self.buffer.items, .{});
+    return Resp{ .join = .success };
 }
 
 fn processPulse(
     self: *Head,
-    allocator: Allocator,
-    slice: []const u8,
-) ProcessError!void {
-    var name: []const u8 = undefined;
-    _ = try mzg.unpack(slice, &name);
+    name: []const u8,
+) ProcessError!Resp {
+    if (self.members.getEntry(name)) |entry| {
+        entry.value_ptr.last_pulse = try .now();
+        return Resp{ .pulse = .success };
+    }
 
-    const result: Pulse = blk: {
-        if (self.members.getEntry(name)) |entry| {
-            entry.value_ptr.last_pulse = try .now();
-            break :blk Pulse.success;
-        } else {
-            break :blk Pulse.absence;
-        }
-    };
-
-    self.buffer.clearRetainingCapacity();
-    const writer = self.buffer.writer(allocator);
-    try mzg.pack("pulse", writer);
-    try mzg.pack(result, writer);
-
-    try self.head.sendSlice(self.buffer.items, .{});
+    return Resp{ .pulse = .absence };
 }
 
 fn processDown(
     self: *Head,
     allocator: Allocator,
-    slice: []const u8,
-) ProcessError!void {
-    var name: []const u8 = undefined;
-    _ = try mzg.unpack(slice, &name);
+    name: []const u8,
+) ProcessError!Resp {
+    var entry = self.members.fetchSwapRemove(name);
+    if (entry) |*kv| {
+        kv.value.deinit(allocator);
+        return Resp{ .down = .success };
+    }
 
-    const result: Down = blk: {
-        var entry = self.members.fetchSwapRemove(name);
-        if (entry) |*kv| {
-            kv.value.deinit(allocator);
-            break :blk .success;
-        } else {
-            break :blk .absence;
-        }
-    };
-
-    self.buffer.clearRetainingCapacity();
-    const writer = self.buffer.writer(allocator);
-    try mzg.pack("down", writer);
-    try mzg.pack(result, writer);
-
-    try self.head.sendSlice(self.buffer.items, .{});
+    return Resp{ .down = .absence };
 }
 
 fn processQuery(
     self: *Head,
-    allocator: Allocator,
-    slice: []const u8,
-) ProcessError!void {
-    var name: []const u8 = undefined;
-    _ = try mzg.unpack(slice, &name);
-
-    self.buffer.clearRetainingCapacity();
-    const writer = self.buffer.writer(allocator);
-
-    if (self.members.get(name)) |member| {
-        try mzg.pack("query", writer);
-        _ = member;
+    name: []const u8,
+) ProcessError!Resp {
+    if (self.members.getEntry(name)) |entry| {
+        entry.value_ptr.last_pulse = try .now();
+        return Resp{
+            .query = .{ .endpoints = entry.value_ptr.endpoints },
+        };
     }
+
+    return Resp{
+        .query = .{ .absence = {} },
+    };
 }
 pub const CheckError = error{Unsupported};
 pub fn checkMembers(self: *Head, allocator: Allocator) CheckError!void {
@@ -188,77 +141,120 @@ pub fn checkMembers(self: *Head, allocator: Allocator) CheckError!void {
     }
 }
 
+pub const PingError = zimq.Socket.RecvMsgError || zimq.Socket.SendError || mzg.PackError(ArrayListUnmanaged(u8).Writer);
+pub fn processPing(self: *Head, allocator: Allocator) PingError!void {
+    try consumeAll(self.ping);
 
+    self.buffer.clearRetainingCapacity();
+    const writer = self.buffer.writer(allocator);
+    try zic.pack(self.members.keys(), writer);
+
+    try self.noti.sendConstSlice("ping", .more);
+    try self.noti.sendSlice(self.buffer.items, .{});
 }
 
-const GetRequestError = zimq.Socket.RecvMsgError || mzg.UnpackError;
-/// This function returns a tuple whose 1st element is the header and the 2nd
-/// element is the body
-fn getRequest(self: *Head) GetRequestError!struct { []const u8, []const u8 } {
-    _ = try self.head.recvMsg(&self.message, .{});
-
-    var header: []const u8 = undefined;
-    const consumed = try mzg.unpack(self.message.slice(), &header);
-
-    return .{ header, self.message.slice()[consumed..] };
-}
-
-pub const Registration = struct {
-    name: []const u8,
-    interval: u64,
-    endpoints: StringArrayHashMapUnmanaged([]const u8) = .empty,
-
-    pub fn deinit(self: *Registration, allocator: Allocator) void {
-        self.endpoints.deinit(allocator);
-    }
-
-    pub const Unpacker = struct {
-        allocator: Allocator,
-        out: *Registration,
-
-        pub fn init(allocator: Allocator, out: *Registration) Unpacker {
-            return .{ .allocator = allocator, .out = out };
-        }
-
-        pub fn mzgUnpack(self: *const Unpacker, buffer: []const u8) mzg.UnpackError!usize {
-            var len: usize = undefined;
-            var consumed: usize = try mzg.unpackArray(buffer, &len);
-
-            if (len != 3) {
-                return mzg.UnpackError.TypeIncompatible;
-            }
-
-            consumed += try mzg.unpack(buffer[consumed..], &self.out.name);
-            consumed += try mzg.unpack(buffer[consumed..], &self.out.interval);
-            self.out.endpoints = .empty;
-            consumed += try mzg.unpack(
-                buffer[consumed..],
-                adapter.unpackMap(self.allocator, &self.out.endpoints, .@"error"),
-            );
-
-            return consumed;
-        }
-    };
-
-    pub fn mzgUnpacker(self: *Registration, allocator: Allocator) Unpacker {
-        return .init(allocator, self);
-    }
-};
-pub const Member = struct {
+const Member = struct {
     name: []const u8,
     interval: u64,
     last_pulse: Instant,
     endpoints: StringArrayHashMapUnmanaged([]const u8),
-    raw: ArrayListUnmanaged(u8),
+    backing: ArrayListUnmanaged(u8),
 
-    pub fn deinit(self: *Member, allocator: Allocator) void {
+    fn fromJoin(
+        allocator: Allocator,
+        join: Req.Join,
+        last_pulse: Instant,
+    ) Allocator.Error!Member {
+        var result: Member = .{
+            .name = undefined,
+            .interval = join.interval,
+            .last_pulse = last_pulse,
+            .endpoints = .empty,
+            .backing = .empty,
+        };
+
+        try result.backing.appendSlice(allocator, join.name);
+        result.name = result.backing.items[0..];
+
+        const slice = join.endpoints.entries;
+        for (slice.items(.key), slice.items(.value)) |key, value| {
+            const new_key = blk: {
+                const old_len = result.backing.items.len;
+                try result.backing.appendSlice(allocator, key);
+
+                break :blk result.backing.items[old_len..];
+            };
+            const new_value = blk: {
+                const old_len = result.backing.items.len;
+                try result.backing.appendSlice(allocator, value);
+
+                break :blk result.backing.items[old_len..];
+            };
+            try result.endpoints.put(allocator, new_key, new_value);
+        }
+
+        return result;
+    }
+
+    fn deinit(self: *Member, allocator: Allocator) void {
         self.endpoints.deinit(allocator);
-        self.raw.deinit(allocator);
+        self.backing.deinit(allocator);
+    }
+};
+
+pub const Req = union(enum) {
+    pub const Join = struct {
+        name: []const u8,
+        interval: u64,
+        endpoints: StringArrayHashMapUnmanaged([]const u8) = .empty,
+
+        pub fn deinit(self: *Join, allocator: Allocator) void {
+            self.endpoints.deinit(allocator);
+        }
+    };
+
+    join: Join,
+    pulse: []const u8,
+    down: []const u8,
+    query: []const u8,
+
+    pub fn deinit(self: *Req, allocator: Allocator) void {
+        switch (self.*) {
+            .join => |*value| value.deinit(allocator),
+            else => {},
+        }
+    }
+};
+
+pub const Resp = union(enum) {
+    pub const Query = union(enum) {
+        endpoints: StringArrayHashMapUnmanaged([]const u8),
+        absence: void,
+
+        pub fn deinit(self: *Query, allocator: Allocator) void {
+            switch (self.*) {
+                .endpoints => |*value| value.deinit(allocator),
+                else => {},
+            }
+        }
+    };
+
+    join: enum { success, duplicate },
+    pulse: enum { success, absence },
+    down: enum { success, absence },
+    query: Query,
+
+    pub fn deinit(self: *Resp, allocator: Allocator) void {
+        switch (self.*) {
+            .query => |*query| query.deinit(allocator),
+            else => {},
+        }
     }
 };
 
 test processJoin {
     const t = std.testing;
+    const allocator = t.allocator;
 
     var context: *zimq.Context = try .init();
     defer context.deinit();
@@ -268,7 +264,7 @@ test processJoin {
         .noti = "inproc://#1/noti",
         .ping = "inproc://#1/ping",
     });
-    defer head.deinit(t.allocator);
+    defer head.deinit(allocator);
 
     var nerve: *zimq.Socket = try .init(context, .req);
     defer nerve.deinit();
@@ -276,48 +272,65 @@ test processJoin {
     try nerve.connect("inproc://#1/head");
 
     var buffer: ArrayListUnmanaged(u8) = .empty;
-    defer buffer.deinit(t.allocator);
-
-    const writer = buffer.writer(t.allocator);
-    try mzg.pack("join", writer);
-    try mzg.pack(
-        .{ "test", 1 * ns_per_s, adapter.packMap(&StringArrayHashMapUnmanaged(u8).empty) },
-        writer,
-    );
-    try nerve.sendSlice(buffer.items, .{});
-
-    try head.processHead(t.allocator);
-
-    const member = head.members.get("test");
-    try t.expect(member != null);
-    try t.expectEqualStrings("test", member.?.name);
-    try t.expectEqual(1 * ns_per_s, member.?.interval);
-
-    var message: zimq.Message = .empty();
-    _ = try nerve.recvMsg(&message, .{});
-    try t.expect(!message.more());
+    defer buffer.deinit(allocator);
 
     {
-        var response = try Resp.parse(t.allocator, message.slice());
-        defer response.deinit(t.allocator);
-        try t.expectEqual(Resp{ .join = .success }, response);
+        buffer.clearRetainingCapacity();
+        const writer = buffer.writer(allocator);
+        var req: Req = .{
+            .join = .{
+                .name = "test",
+                .interval = 1 * ns_per_s,
+                .endpoints = try .init(
+                    allocator,
+                    &.{ "some", "kind" },
+                    &.{ "of", "test" },
+                ),
+            },
+        };
+        defer req.deinit(allocator);
+
+        try zic.pack(req, writer);
+        try nerve.sendSlice(buffer.items, .{});
+        try head.processHead(allocator);
+
+        const member = head.members.get("test");
+        try t.expect(member != null);
+        try t.expectEqualStrings("test", member.?.name);
+        try t.expectEqual(1 * ns_per_s, member.?.interval);
+        try t.expectEqualStrings("of", member.?.endpoints.get("some").?);
+        try t.expectEqualStrings("test", member.?.endpoints.get("kind").?);
     }
 
-    // Joining again should fail with `duplicate` returned
-    try nerve.sendSlice(buffer.items, .{});
-    try head.processHead(t.allocator);
+    {
+        var message: zimq.Message = .empty();
+        _ = try nerve.recvMsg(&message, .{});
+        try t.expect(!message.more());
 
-    _ = try nerve.recvMsg(&message, .{});
-    try t.expect(!message.more());
+        var resp: Resp = undefined;
+        _ = try zic.unpackAllocate(allocator, message.slice(), &resp);
+        defer resp.deinit(allocator);
+        try t.expectEqual(Resp{ .join = .success }, resp);
+    }
 
     {
-        var response = try Resp.parse(t.allocator, message.slice());
-        defer response.deinit(t.allocator);
-        try t.expectEqual(Resp{ .join = .duplicate }, response);
+        // Joining again should fail with `duplicate` returned
+        try nerve.sendSlice(buffer.items, .{});
+        try head.processHead(allocator);
+
+        var message: zimq.Message = .empty();
+        _ = try nerve.recvMsg(&message, .{});
+        try t.expect(!message.more());
+
+        var resp: Resp = undefined;
+        _ = try zic.unpackAllocate(allocator, message.slice(), &resp);
+        defer resp.deinit(allocator);
+        try t.expectEqual(Resp{ .join = .duplicate }, resp);
     }
 }
 test processPulse {
     const t = std.testing;
+    const allocator = t.allocator;
 
     var context: *zimq.Context = try .init();
     defer context.deinit();
@@ -327,69 +340,79 @@ test processPulse {
         .noti = "inproc://#1/noti",
         .ping = "inproc://#1/ping",
     });
-    defer head.deinit(t.allocator);
+    defer head.deinit(allocator);
 
     var nerve: *zimq.Socket = try .init(context, .req);
     defer nerve.deinit();
 
     try nerve.connect("inproc://#1/head");
 
-    var buffer: ArrayListUnmanaged(u8) = .empty;
-    defer buffer.deinit(t.allocator);
-
-    var message: zimq.Message = .empty();
     {
-        defer buffer.clearRetainingCapacity();
+        var buffer: ArrayListUnmanaged(u8) = .empty;
+        defer buffer.deinit(allocator);
 
-        const writer = buffer.writer(t.allocator);
-        try mzg.pack("join", writer);
-        try mzg.pack(
-            .{
-                "test",
-                1 * ns_per_s,
-                adapter.packMap(&StringArrayHashMapUnmanaged(u8).empty),
+        const writer = buffer.writer(allocator);
+        try zic.pack(
+            Req{
+                .join = .{
+                    .name = "test",
+                    .interval = 1 * ns_per_s,
+                    .endpoints = .empty,
+                },
             },
             writer,
         );
         try nerve.sendSlice(buffer.items, .{});
-        try head.processHead(t.allocator);
+        try head.processHead(allocator);
+
+        var message: zimq.Message = .empty();
+        defer message.deinit();
         _ = try nerve.recvMsg(&message, .{});
+        try t.expect(!message.more());
     }
 
     {
-        defer buffer.clearRetainingCapacity();
+        var buffer: ArrayListUnmanaged(u8) = .empty;
+        defer buffer.deinit(allocator);
 
-        const writer = buffer.writer(t.allocator);
-        try mzg.pack("pulse", writer);
-        try mzg.pack("test", writer);
+        const writer = buffer.writer(allocator);
+        try zic.pack(Req{ .pulse = "test" }, writer);
         try nerve.sendSlice(buffer.items, .{});
-        try head.processHead(t.allocator);
+        try head.processHead(allocator);
 
+        var message: zimq.Message = .empty();
+        defer message.deinit();
         _ = try nerve.recvMsg(&message, .{});
         try t.expect(!message.more());
-        var response = try Resp.parse(t.allocator, message.slice());
-        defer response.deinit(t.allocator);
-        try t.expectEqual(Resp{ .pulse = .success }, response);
+
+        var resp: Resp = undefined;
+        _ = try zic.unpackAllocate(allocator, message.slice(), &resp);
+        try t.expectEqual(Resp{ .pulse = .success }, resp);
     }
 
     {
-        defer buffer.clearRetainingCapacity();
+        var buffer: ArrayListUnmanaged(u8) = .empty;
+        defer buffer.deinit(allocator);
 
-        const writer = buffer.writer(t.allocator);
-        try mzg.pack("pulse", writer);
-        try mzg.pack("asdf", writer);
+        const writer = buffer.writer(allocator);
+        try zic.pack(Req{ .pulse = "asdf" }, writer);
         try nerve.sendSlice(buffer.items, .{});
-        try head.processHead(t.allocator);
+        try head.processHead(allocator);
 
+        var message: zimq.Message = .empty();
+        defer message.deinit();
         _ = try nerve.recvMsg(&message, .{});
         try t.expect(!message.more());
-        var response = try Resp.parse(t.allocator, message.slice());
-        defer response.deinit(t.allocator);
-        try t.expectEqual(Resp{ .pulse = .absence }, response);
+
+        var resp: Resp = undefined;
+        _ = try zic.unpackAllocate(allocator, message.slice(), &resp);
+        defer resp.deinit(allocator);
+        try t.expectEqual(Resp{ .pulse = .absence }, resp);
     }
 }
 test processDown {
     const t = std.testing;
+    const allocator = t.allocator;
 
     var context: *zimq.Context = try .init();
     defer context.deinit();
@@ -399,7 +422,7 @@ test processDown {
         .noti = "inproc://#1/noti",
         .ping = "inproc://#1/ping",
     });
-    defer head.deinit(t.allocator);
+    defer head.deinit(allocator);
 
     var nerve: *zimq.Socket = try .init(context, .req);
     defer nerve.deinit();
@@ -407,77 +430,161 @@ test processDown {
     try nerve.connect("inproc://#1/head");
 
     var buffer: ArrayListUnmanaged(u8) = .empty;
-    defer buffer.deinit(t.allocator);
+    defer buffer.deinit(allocator);
+    const writer = buffer.writer(allocator);
 
     var message: zimq.Message = .empty();
+    defer message.deinit();
+
     {
         defer buffer.clearRetainingCapacity();
 
-        const writer = buffer.writer(t.allocator);
-        try mzg.pack("join", writer);
-        try mzg.pack(
-            .{
-                "test",
-                1 * ns_per_s,
-                adapter.packMap(&StringArrayHashMapUnmanaged(u8).empty),
+        try zic.pack(Req{
+            .join = .{
+                .name = "test",
+                .interval = 1 * ns_per_s,
+                .endpoints = .empty,
             },
-            writer,
+        }, writer);
+        try nerve.sendSlice(buffer.items, .{});
+        try head.processHead(allocator);
+        _ = try nerve.recvMsg(&message, .{});
+    }
+
+    {
+        defer buffer.clearRetainingCapacity();
+        try zic.pack(Req{ .down = "test" }, writer);
+        try nerve.sendSlice(buffer.items, .{});
+        try head.processHead(allocator);
+
+        _ = try nerve.recvMsg(&message, .{});
+        try t.expect(!message.more());
+
+        var resp: Resp = undefined;
+        _ = try zic.unpackAllocate(allocator, message.slice(), &resp);
+        defer resp.deinit(allocator);
+        try t.expectEqual(Resp{ .down = .success }, resp);
+    }
+
+    {
+        defer buffer.clearRetainingCapacity();
+
+        try zic.pack(Req{ .pulse = "asdf" }, writer);
+        try nerve.sendSlice(buffer.items, .{});
+        try head.processHead(allocator);
+
+        _ = try nerve.recvMsg(&message, .{});
+        try t.expect(!message.more());
+
+        var resp: Resp = undefined;
+        _ = try zic.unpackAllocate(allocator, message.slice(), &resp);
+        defer resp.deinit(allocator);
+        try t.expectEqual(Resp{ .pulse = .absence }, resp);
+    }
+
+    {
+        defer buffer.clearRetainingCapacity();
+
+        try zic.pack(Req{ .down = "test" }, writer);
+        try nerve.sendSlice(buffer.items, .{});
+        try head.processHead(allocator);
+
+        _ = try nerve.recvMsg(&message, .{});
+        try t.expect(!message.more());
+
+        var resp: Resp = undefined;
+        _ = try zic.unpackAllocate(allocator, message.slice(), &resp);
+        defer resp.deinit(allocator);
+        try t.expectEqual(Resp{ .down = .absence }, resp);
+    }
+}
+test processQuery {
+    const t = std.testing;
+    const allocator = t.allocator;
+
+    var context: *zimq.Context = try .init();
+    defer context.deinit();
+
+    var head: Head = try .init(context, .{
+        .head = "inproc://#1/head",
+        .noti = "inproc://#1/noti",
+        .ping = "inproc://#1/ping",
+    });
+    defer head.deinit(allocator);
+
+    var nerve: *zimq.Socket = try .init(context, .req);
+    defer nerve.deinit();
+
+    try nerve.connect("inproc://#1/head");
+
+    var buffer: ArrayListUnmanaged(u8) = .empty;
+    defer buffer.deinit(allocator);
+    const writer = buffer.writer(allocator);
+
+    var message: zimq.Message = .empty();
+    defer message.deinit();
+
+    {
+        defer buffer.clearRetainingCapacity();
+
+        var req: Req = .{
+            .join = .{
+                .name = "test",
+                .interval = 10 * ns_per_ms,
+                .endpoints = try .init(
+                    allocator,
+                    &.{"service"},
+                    &.{"endpoint"},
+                ),
+            },
+        };
+        defer req.deinit(allocator);
+        try zic.pack(req, writer);
+        try nerve.sendSlice(buffer.items, .{});
+        try head.processHead(allocator);
+
+        _ = try nerve.recvMsg(&message, .{});
+    }
+
+    {
+        defer buffer.clearRetainingCapacity();
+
+        try zic.pack(Req{ .query = "test" }, writer);
+        try nerve.sendSlice(buffer.items, .{});
+        try head.processHead(allocator);
+
+        _ = try nerve.recvMsg(&message, .{});
+        var actual: Resp = undefined;
+        _ = try zic.unpackAllocate(allocator, message.slice(), &actual);
+        defer actual.deinit(allocator);
+
+        try t.expectEqualStrings(
+            "endpoint",
+            actual.query.endpoints.get("service").?,
         );
-        try nerve.sendSlice(buffer.items, .{});
-        try head.processHead(t.allocator);
-        _ = try nerve.recvMsg(&message, .{});
     }
 
     {
         defer buffer.clearRetainingCapacity();
 
-        const writer = buffer.writer(t.allocator);
-        try mzg.pack("down", writer);
-        try mzg.pack("test", writer);
+        try zic.pack(Req{ .query = "nowaythisexists" }, writer);
         try nerve.sendSlice(buffer.items, .{});
-        try head.processHead(t.allocator);
+        try head.processHead(allocator);
 
         _ = try nerve.recvMsg(&message, .{});
-        try t.expect(!message.more());
-        var response = try Resp.parse(t.allocator, message.slice());
-        defer response.deinit(t.allocator);
-        try t.expectEqual(Resp{ .down = .success }, response);
-    }
+        var actual: Resp = undefined;
+        _ = try zic.unpackAllocate(allocator, message.slice(), &actual);
+        defer actual.deinit(allocator);
 
-    {
-        defer buffer.clearRetainingCapacity();
-
-        const writer = buffer.writer(t.allocator);
-        try mzg.pack("pulse", writer);
-        try mzg.pack("asdf", writer);
-        try nerve.sendSlice(buffer.items, .{});
-        try head.processHead(t.allocator);
-
-        _ = try nerve.recvMsg(&message, .{});
-        try t.expect(!message.more());
-        var response = try Resp.parse(t.allocator, message.slice());
-        defer response.deinit(t.allocator);
-        try t.expectEqual(Resp{ .pulse = .absence }, response);
-    }
-
-    {
-        defer buffer.clearRetainingCapacity();
-
-        const writer = buffer.writer(t.allocator);
-        try mzg.pack("down", writer);
-        try mzg.pack("test", writer);
-        try nerve.sendSlice(buffer.items, .{});
-        try head.processHead(t.allocator);
-
-        _ = try nerve.recvMsg(&message, .{});
-        try t.expect(!message.more());
-        var response = try Resp.parse(t.allocator, message.slice());
-        defer response.deinit(t.allocator);
-        try t.expectEqual(Resp{ .down = .absence }, response);
+        const expected = Resp{
+            .query = .{ .absence = {} },
+        };
+        try t.expectEqual(expected, actual);
     }
 }
 test checkMembers {
     const t = std.testing;
+    const allocator = t.allocator;
 
     var context: *zimq.Context = try .init();
     defer context.deinit();
@@ -487,7 +594,7 @@ test checkMembers {
         .noti = "inproc://#1/noti",
         .ping = "inproc://#1/ping",
     });
-    defer head.deinit(t.allocator);
+    defer head.deinit(allocator);
 
     var nerve: *zimq.Socket = try .init(context, .req);
     defer nerve.deinit();
@@ -495,93 +602,76 @@ test checkMembers {
     try nerve.connect("inproc://#1/head");
 
     var buffer: ArrayListUnmanaged(u8) = .empty;
-    defer buffer.deinit(t.allocator);
+    defer buffer.deinit(allocator);
+    const writer = buffer.writer(allocator);
 
     var message: zimq.Message = .empty();
     {
         defer buffer.clearRetainingCapacity();
 
-        const writer = buffer.writer(t.allocator);
-        try mzg.pack("join", writer);
-        try mzg.pack(
-            .{
-                "test1",
-                10 * ns_per_ms,
-                adapter.packMap(&StringArrayHashMapUnmanaged(u8).empty),
+        try zic.pack(Req{
+            .join = .{
+                .name = "test1",
+                .interval = 10 * ns_per_ms,
+                .endpoints = .empty,
             },
-            writer,
-        );
+        }, writer);
         try nerve.sendSlice(buffer.items, .{});
-        try head.processHead(t.allocator);
+        try head.processHead(allocator);
         _ = try nerve.recvMsg(&message, .{});
     }
     {
         defer buffer.clearRetainingCapacity();
-
-        const writer = buffer.writer(t.allocator);
-        try mzg.pack("join", writer);
-        try mzg.pack(
-            .{
-                "test2",
-                10 * ns_per_s,
-                adapter.packMap(&StringArrayHashMapUnmanaged(u8).empty),
+        try zic.pack(Req{
+            .join = .{
+                .name = "test2",
+                .interval = 10 * ns_per_s,
+                .endpoints = .empty,
             },
-            writer,
-        );
+        }, writer);
         try nerve.sendSlice(buffer.items, .{});
-        try head.processHead(t.allocator);
+        try head.processHead(allocator);
         _ = try nerve.recvMsg(&message, .{});
     }
 
-    try head.checkMembers(t.allocator);
+    try head.checkMembers(allocator);
     try t.expectEqual(2, head.members.count());
 
     std.Thread.sleep(11 * ns_per_ms);
 
-    try head.checkMembers(t.allocator);
+    try head.checkMembers(allocator);
     try t.expectEqual(1, head.members.count());
 
     {
         defer buffer.clearRetainingCapacity();
 
-        const writer = buffer.writer(t.allocator);
-        try mzg.pack("pulse", writer);
-        try mzg.pack("test1", writer);
+        try zic.pack(Req{ .pulse = "test1" }, writer);
         try nerve.sendSlice(buffer.items, .{});
-        try head.processHead(t.allocator);
+        try head.processHead(allocator);
 
         _ = try nerve.recvMsg(&message, .{});
         try t.expect(!message.more());
-        var response = try Resp.parse(t.allocator, message.slice());
-        defer response.deinit(t.allocator);
-        try t.expectEqual(Resp{ .pulse = .absence }, response);
+
+        var resp: Resp = undefined;
+        _ = try zic.unpackAllocate(allocator, message.slice(), &resp);
+        defer resp.deinit(allocator);
+        try t.expectEqual(Resp{ .pulse = .absence }, resp);
     }
     {
         defer buffer.clearRetainingCapacity();
 
-        const writer = buffer.writer(t.allocator);
-        try mzg.pack("pulse", writer);
-        try mzg.pack("test2", writer);
+        try zic.pack(Req{ .pulse = "test2" }, writer);
         try nerve.sendSlice(buffer.items, .{});
-        try head.processHead(t.allocator);
+        try head.processHead(allocator);
 
         _ = try nerve.recvMsg(&message, .{});
         try t.expect(!message.more());
-        var response = try Resp.parse(t.allocator, message.slice());
-        defer response.deinit(t.allocator);
-        try t.expectEqual(Resp{ .pulse = .success }, response);
+
+        var resp: Resp = undefined;
+        _ = try zic.unpackAllocate(allocator, message.slice(), &resp);
+        defer resp.deinit(allocator);
+        try t.expectEqual(Resp{ .pulse = .success }, resp);
     }
-}
-test Registration {
-    const t = std.testing;
-
-    var registration: Registration = undefined;
-    _ = try mzg.unpack(
-        "\x93\xA4test\xCE\x3B\x9A\xCA\x00\x80",
-        registration.mzgUnpacker(t.allocator),
-    );
-
-    try t.expectEqualStrings("test", registration.name);
 }
 
 const std = @import("std");
@@ -599,7 +689,4 @@ const mzg = @import("mzg");
 const adapter = mzg.adapter;
 
 const zic = @import("root.zig");
-const Resp = zic.Resp;
-const Join = zic.Join;
-const Pulse = zic.Pulse;
-const Down = zic.Down;
+const consumeAll = zic.consumeAll;

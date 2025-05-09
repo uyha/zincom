@@ -23,7 +23,7 @@ const unpack_map = .{
 pub fn unpack(
     buffer: []const u8,
     out: anytype,
-) mzg.UnpackAllocateError!usize {
+) mzg.UnpackError!usize {
     return mzg.unpackAdapted(unpack_map, buffer, out);
 }
 pub fn unpackAllocate(
@@ -44,14 +44,7 @@ pub const Source = source.Source;
 const sink = @import("sink.zig");
 pub const Sink = source.Sink;
 
-const resp = @import("resp.zig");
-pub const Join = resp.Join;
-pub const Pulse = resp.Pulse;
-pub const Down = resp.Down;
-pub const Query = resp.Query;
-pub const Resp = resp.Resp;
-
-// pub const Head = @import("Head.zig");
+pub const Head = @import("Head.zig");
 // pub const Nerve = @import("Nerve.zig");
 
 comptime {
@@ -59,7 +52,6 @@ comptime {
 
     t.refAllDecls(source);
     t.refAllDecls(sink);
-    t.refAllDecls(resp);
-    // t.refAllDecls(Head);
+    t.refAllDecls(Head);
     // t.refAllDecls(Nerve);
 }
