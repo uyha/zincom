@@ -29,12 +29,7 @@ pub fn sendPulse(
     allocator: Allocator,
     name: []const u8,
 ) SendError!void {
-    self.buffer.clearRetainingCapacity();
-
-    const writer = self.buffer.writer(allocator);
-    try zic.pack(Req{ .pulse = name }, writer);
-
-    try self.head.sendSlice(self.buffer.items, .{});
+    return self.sendRequest(allocator, Req{ .pulse = name });
 }
 
 pub fn sendJoin(
@@ -44,25 +39,32 @@ pub fn sendJoin(
     interval: u64,
     endpoints: StaticStringMap([]const u8),
 ) SendError!void {
-    self.buffer.clearRetainingCapacity();
-
-    const writer = self.buffer.writer(allocator);
-    try zic.pack(Req{
+    return self.sendRequest(allocator, Req{
         .join = .{
             .name = name,
             .interval = interval,
             .endpoints = endpoints,
         },
-    }, writer);
-
-    try self.head.sendSlice(self.buffer.items, .{});
+    });
 }
 
 pub fn sendDown(self: *Nerve, allocator: Allocator, name: []const u8) SendError!void {
+    return self.sendRequest(allocator, Req{ .down = name });
+}
+
+pub fn sendQuery(self: *Nerve, allocator: Allocator, name: []const u8) SendError!void {
+    return self.sendRequest(allocator, Req{ .query = name });
+}
+
+inline fn sendRequest(
+    self: *Nerve,
+    allocator: Allocator,
+    req: Req,
+) SendError!void {
     self.buffer.clearRetainingCapacity();
 
     const writer = self.buffer.writer(allocator);
-    try zic.pack(Req{ .down = name }, writer);
+    try zic.pack(req, writer);
 
     try self.head.sendSlice(self.buffer.items, .{});
 }

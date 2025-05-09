@@ -143,6 +143,56 @@ test "Head and Nerve checkMembers" {
     }
 }
 
+test "Head and Nerve query" {
+    const allocator = t.allocator;
+
+    var context: *zimq.Context = try .init();
+    defer context.deinit();
+
+    var head: zic.Head = try .init(context, .{
+        .head = "inproc://#1/head",
+        .noti = "inproc://#1/noti",
+        .ping = "inproc://#1/ping",
+    });
+    defer head.deinit(allocator);
+
+    var nerve: zic.Nerve = try .init(context, "inproc://#1/head");
+    defer nerve.deinit(allocator);
+
+    try nerve.sendJoin(allocator, "test", 10 * ns_per_ms, .initComptime(
+        .{
+            &.{ "hello", "inproc://#1/hello" },
+        },
+    ));
+    try head.processHead(allocator);
+    _ = try nerve.getResponse(allocator);
+
+    {
+        sleep(5 * ns_per_ms);
+        try head.checkMembers(allocator);
+
+        try nerve.sendQuery(allocator, "test");
+        try head.processHead(allocator);
+
+        var actual = try nerve.getResponse(allocator);
+        defer actual.deinit(allocator);
+        const endpoints = actual.query.endpoints;
+        try t.expectEqualStrings("inproc://#1/hello", endpoints.get("hello").?);
+    }
+
+    {
+        sleep(11 * ns_per_ms);
+        try head.checkMembers(allocator);
+
+        try nerve.sendQuery(allocator, "test");
+        try head.processHead(allocator);
+
+        var actual = try nerve.getResponse(allocator);
+        defer actual.deinit(allocator);
+        try t.expectEqual(Resp{ .query = .absence }, actual);
+    }
+}
+
 const std = @import("std");
 const t = std.testing;
 const ns_per_ms = std.time.ns_per_ms;

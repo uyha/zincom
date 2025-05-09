@@ -120,9 +120,7 @@ fn processQuery(
         };
     }
 
-    return Resp{
-        .query = .{ .absence = {} },
-    };
+    return Resp{ .query = .absence };
 }
 pub const CheckError = error{Unsupported};
 pub fn checkMembers(self: *Head, allocator: Allocator) CheckError!void {
