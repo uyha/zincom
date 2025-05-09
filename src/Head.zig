@@ -114,10 +114,9 @@ fn processQuery(
     self: *Head,
     name: []const u8,
 ) ProcessError!Resp {
-    if (self.members.getEntry(name)) |entry| {
-        entry.value_ptr.last_pulse = try .now();
+    if (self.members.get(name)) |entry| {
         return Resp{
-            .query = .{ .endpoints = entry.value_ptr.endpoints },
+            .query = .{ .endpoints = entry.endpoints },
         };
     }
 
@@ -157,7 +156,7 @@ const Member = struct {
     name: []const u8,
     interval: u64,
     last_pulse: Instant,
-    endpoints: StringArrayHashMapUnmanaged([]const u8),
+    endpoints: StaticStringMap([]const u8),
     backing: ArrayListUnmanaged(u8),
 
     fn fromJoin(
@@ -169,29 +168,33 @@ const Member = struct {
             .name = undefined,
             .interval = join.interval,
             .last_pulse = last_pulse,
-            .endpoints = .empty,
+            .endpoints = undefined,
             .backing = .empty,
         };
 
         try result.backing.appendSlice(allocator, join.name);
         result.name = result.backing.items[0..];
 
-        const slice = join.endpoints.entries;
-        for (slice.items(.key), slice.items(.value)) |key, value| {
-            const new_key = blk: {
+        var kvs = try allocator.alloc(
+            struct { []const u8, []const u8 },
+            join.endpoints.kvs.len,
+        );
+        defer allocator.free(kvs);
+        for (join.endpoints.keys(), join.endpoints.values(), 0..) |key, value, i| {
+            kvs[i][0] = blk: {
                 const old_len = result.backing.items.len;
                 try result.backing.appendSlice(allocator, key);
 
                 break :blk result.backing.items[old_len..];
             };
-            const new_value = blk: {
+            kvs[i][1] = blk: {
                 const old_len = result.backing.items.len;
                 try result.backing.appendSlice(allocator, value);
 
                 break :blk result.backing.items[old_len..];
             };
-            try result.endpoints.put(allocator, new_key, new_value);
         }
+        result.endpoints = try .init(kvs, allocator);
 
         return result;
     }
@@ -206,7 +209,7 @@ pub const Req = union(enum) {
     pub const Join = struct {
         name: []const u8,
         interval: u64,
-        endpoints: StringArrayHashMapUnmanaged([]const u8) = .empty,
+        endpoints: StaticStringMap([]const u8),
 
         pub fn deinit(self: *Join, allocator: Allocator) void {
             self.endpoints.deinit(allocator);
@@ -228,7 +231,7 @@ pub const Req = union(enum) {
 
 pub const Resp = union(enum) {
     pub const Query = union(enum) {
-        endpoints: StringArrayHashMapUnmanaged([]const u8),
+        endpoints: StaticStringMap([]const u8),
         absence: void,
 
         pub fn deinit(self: *Query, allocator: Allocator) void {

@@ -23,7 +23,7 @@ test "Head and Nerve join" {
         try head.processHead(allocator);
 
         const response = try nerve.getResponse(allocator);
-        try t.expectEqual(zic.Resp{ .join = .success }, response);
+        try t.expectEqual(Resp{ .join = .success }, response);
     }
 
     {
@@ -35,7 +35,7 @@ test "Head and Nerve join" {
         try head.processHead(allocator);
 
         const response = try nerve.getResponse(allocator);
-        try t.expectEqual(zic.Resp{ .join = .duplicate }, response);
+        try t.expectEqual(Resp{ .join = .duplicate }, response);
     }
 }
 
@@ -68,7 +68,7 @@ test "Head and Nerve down" {
         try head.processHead(allocator);
 
         const response = try nerve.getResponse(allocator);
-        try t.expectEqual(zic.Resp{ .down = .success }, response);
+        try t.expectEqual(Resp{ .down = .success }, response);
     }
 
     {
@@ -76,7 +76,7 @@ test "Head and Nerve down" {
         try head.processHead(allocator);
 
         const response = try nerve.getResponse(allocator);
-        try t.expectEqual(zic.Resp{ .pulse = .absence }, response);
+        try t.expectEqual(Resp{ .pulse = .absence }, response);
     }
 
     {
@@ -84,7 +84,7 @@ test "Head and Nerve down" {
         try head.processHead(allocator);
 
         const response = try nerve.getResponse(allocator);
-        try t.expectEqual(zic.Resp{ .down = .absence }, response);
+        try t.expectEqual(Resp{ .down = .absence }, response);
     }
 
     {
@@ -92,7 +92,7 @@ test "Head and Nerve down" {
         try head.processHead(allocator);
 
         const response = try nerve.getResponse(allocator);
-        try t.expectEqual(zic.Resp{ .down = .absence }, response);
+        try t.expectEqual(Resp{ .down = .absence }, response);
     }
 }
 
@@ -128,7 +128,7 @@ test "Head and Nerve checkMembers" {
         try head.processHead(allocator);
 
         const response = try nerve.getResponse(allocator);
-        try t.expectEqual(zic.Resp{ .pulse = .success }, response);
+        try t.expectEqual(Resp{ .pulse = .success }, response);
     }
 
     {
@@ -139,7 +139,7 @@ test "Head and Nerve checkMembers" {
         try head.processHead(allocator);
 
         const response = try nerve.getResponse(allocator);
-        try t.expectEqual(zic.Resp{ .pulse = .absence }, response);
+        try t.expectEqual(Resp{ .pulse = .absence }, response);
     }
 }
 
@@ -148,5 +148,7 @@ const t = std.testing;
 const ns_per_ms = std.time.ns_per_ms;
 const sleep = std.Thread.sleep;
 
-const zic = @import("zic");
 const zimq = @import("zimq");
+
+const zic = @import("zic");
+const Resp = zic.Head.Resp;

@@ -24,12 +24,15 @@ pub fn deinit(self: *Nerve, allocator: Allocator) void {
 pub const SendError =
     zimq.Socket.SendError || mzg.PackError(ArrayListUnmanaged(u8).Writer);
 
-pub fn sendPulse(self: *Nerve, allocator: Allocator, name: []const u8) SendError!void {
+pub fn sendPulse(
+    self: *Nerve,
+    allocator: Allocator,
+    name: []const u8,
+) SendError!void {
     self.buffer.clearRetainingCapacity();
 
     const writer = self.buffer.writer(allocator);
-    try mzg.pack("pulse", writer);
-    try mzg.pack(name, writer);
+    try zic.pack(Req{ .pulse = name }, writer);
 
     try self.head.sendSlice(self.buffer.items, .{});
 }
@@ -44,11 +47,13 @@ pub fn sendJoin(
     self.buffer.clearRetainingCapacity();
 
     const writer = self.buffer.writer(allocator);
-    try mzg.pack("join", writer);
-    try mzg.pack(
-        .{ name, interval, packMap(&endpoints) },
-        writer,
-    );
+    try zic.pack(Req{
+        .join = .{
+            .name = name,
+            .interval = interval,
+            .endpoints = endpoints,
+        },
+    }, writer);
 
     try self.head.sendSlice(self.buffer.items, .{});
 }
@@ -57,18 +62,14 @@ pub fn sendDown(self: *Nerve, allocator: Allocator, name: []const u8) SendError!
     self.buffer.clearRetainingCapacity();
 
     const writer = self.buffer.writer(allocator);
-    try mzg.pack("down", writer);
-    try mzg.pack(name, writer);
+    try zic.pack(Req{ .down = name }, writer);
 
     try self.head.sendSlice(self.buffer.items, .{});
 }
 
-pub const ResponseError = zimq.Socket.RecvMsgError || mzg.UnpackError;
-pub fn getResponse(self: *Nerve, allocator: Allocator) ResponseError!Response {
+pub const ResponseError = zimq.Socket.RecvMsgError || mzg.UnpackAllocateError;
+pub fn getResponse(self: *Nerve, allocator: Allocator) ResponseError!Resp {
     _ = try self.head.recvMsg(&self.message, .{});
-
-    return Response.parse(allocator, self.message.slice());
-}
 
 test sendJoin {
     const t = std.testing;
