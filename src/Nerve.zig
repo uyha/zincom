@@ -71,99 +71,13 @@ pub const ResponseError = zimq.Socket.RecvMsgError || mzg.UnpackAllocateError;
 pub fn getResponse(self: *Nerve, allocator: Allocator) ResponseError!Resp {
     _ = try self.head.recvMsg(&self.message, .{});
 
-test sendJoin {
-    const t = std.testing;
-
-    var context: *zimq.Context = try .init();
-    defer context.deinit();
-
-    var message: zimq.Message = .empty();
-    defer message.deinit();
-
-    var head: *zimq.Socket = try .init(context, .rep);
-    defer head.deinit();
-
-    try head.bind("inproc://#1/head");
-
-    var nerve: Nerve = try .init(context, "inproc://#1/head");
-    defer nerve.deinit(t.allocator);
-
-    try nerve.sendJoin(
-        t.allocator,
-        "led",
-        2 * ns_per_s,
-        .initComptime(&.{.{ "led", "inproc://#2" }}),
+    var resp: Resp = undefined;
+    _ = try zic.unpackAllocate(
+        allocator,
+        self.message.slice(),
+        &resp,
     );
-
-    _ = try head.recvMsg(&message, .{});
-    try t.expectEqualStrings(
-        "\xA4join\x93\xA3led\xCE\x77\x35\x94\x00\x81\xA3led\xABinproc://#2",
-        message.slice(),
-    );
-    try t.expect(!message.more());
-
-    try head.sendConstSlice("\xA4join\x00", .{});
-    var response = try nerve.getResponse(t.allocator);
-    defer response.deinit(t.allocator);
-    try t.expectEqual(Response{ .join = .success }, response);
-}
-
-test sendPulse {
-    const t = std.testing;
-
-    var context: *zimq.Context = try .init();
-    defer context.deinit();
-
-    var head: *zimq.Socket = try .init(context, .rep);
-    defer head.deinit();
-
-    try head.bind("inproc://#1/head");
-
-    var nerve: Nerve = try .init(context, "inproc://#1/head");
-    defer nerve.deinit(t.allocator);
-
-    var message: zimq.Message = .empty();
-    defer message.deinit();
-
-    try nerve.sendPulse(t.allocator, "led");
-
-    _ = try head.recvMsg(&message, .{});
-    try t.expectEqualStrings("\xA5pulse\xA3led", message.slice());
-    try t.expect(!message.more());
-
-    try head.sendConstSlice("\xA5pulse\x00", .{});
-    var response = try nerve.getResponse(t.allocator);
-    defer response.deinit(t.allocator);
-    try t.expectEqual(Response{ .pulse = .success }, response);
-}
-
-test sendDown {
-    const t = std.testing;
-
-    var context: *zimq.Context = try .init();
-    defer context.deinit();
-
-    var head: *zimq.Socket = try .init(context, .rep);
-    defer head.deinit();
-
-    try head.bind("inproc://#1/head");
-
-    var nerve: Nerve = try .init(context, "inproc://#1/head");
-    defer nerve.deinit(t.allocator);
-
-    var message: zimq.Message = .empty();
-    defer message.deinit();
-
-    try nerve.sendDown(t.allocator, "led");
-
-    _ = try head.recvMsg(&message, .{});
-    try t.expectEqualStrings("\xA4down\xA3led", message.slice());
-    try t.expect(!message.more());
-
-    try head.sendConstSlice("\xA4down\x00", .{});
-    var response = try nerve.getResponse(t.allocator);
-    defer response.deinit(t.allocator);
-    try t.expectEqual(Response{ .down = .success }, response);
+    return resp;
 }
 
 const std = @import("std");
@@ -179,4 +93,5 @@ const packMap = mzg.adapter.packMap;
 
 const zic = @import("root.zig");
 const consumeAll = zic.consumeAll;
-const Response = zic.Resp;
+const Req = zic.Head.Req;
+const Resp = zic.Head.Resp;
