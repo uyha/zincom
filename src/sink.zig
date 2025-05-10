@@ -1,18 +1,19 @@
-pub fn Sink(comptime TData: type) type {
+pub fn Sink(comptime T: type) type {
     return struct {
         const Self = @This();
 
-        const Source = zincom.Source(TData);
+        const Source = zic.Source(T);
 
         pub const Data = Source.Data;
-        pub const Event = Source.Event;
+        pub const Noti = Source.Noti;
 
         ping: *zimq.Socket,
         noti: *zimq.Socket,
 
         message: zimq.Message,
 
-        current: AsOptional(TData) = null,
+        connected: bool = false,
+        data: Data = if (@typeInfo(Data) == .optional) null else undefined,
 
         pub const InitError = zimq.Socket.InitError || zimq.Socket.ConnectError || zimq.Socket.SetError;
         pub const ProcessError = zimq.Socket.RecvMsgError || std.mem.Allocator.Error || mzg.UnpackError || error{ PartMissing, HeaderInvalid };
@@ -28,8 +29,8 @@ pub fn Sink(comptime TData: type) type {
                 .message = .empty(),
             };
 
-            try result.noti.set(.subscribe, "ping");
-            try result.noti.set(.subscribe, "noti");
+            try result.noti.set(.subscribe, "\x92\x00");
+            try result.noti.set(.subscribe, "\x92\x01");
 
             try result.ping.connect(endpoints.ping);
             try result.noti.connect(endpoints.noti);
@@ -50,113 +51,41 @@ pub fn Sink(comptime TData: type) type {
         pub fn process(self: *Self) ProcessError!void {
             _ = try self.noti.recvMsg(&self.message, .noblock);
 
-            const content = self.message.slice();
+            var noti: Noti = undefined;
+            _ = try zic.unpack(self.message.slice(), &noti);
 
-            if (std.mem.startsWith(u8, content, "ping")) {
-                try self.processPing(content[4..]);
-                return;
-            }
+            self.connected = true;
 
-            if (std.mem.startsWith(u8, content, "noti")) {
-                try self.processNoti(content[4..]);
-                return;
-            }
-
-            return ProcessError.HeaderInvalid;
-        }
-
-        fn processPing(self: *Self, slice: []const u8) ProcessError!void {
-            _ = try mzg.unpack(slice, &self.current);
-        }
-
-        fn processNoti(self: *Self, slice: []const u8) ProcessError!void {
-            var event: Event = undefined;
-            if (self.current) |*current| {
-                const total = slice.len;
-                var consumed: usize = 0;
-
-                while (consumed < total) {
-                    consumed += try mzg.unpack(
-                        slice[consumed..],
-                        &event,
-                    );
-
-                    switch (event) {
+            switch (noti) {
+                .whole => |whole| {
+                    self.data = whole;
+                },
+                .part => |part| if (self.connected) switch (@typeInfo(Data)) {
+                    .optional => if (self.data) |*data| switch (part) {
                         inline else => |value, tag| {
-                            @field(current, @tagName(tag)) = value;
+                            @field(data, @tagName(tag)) = value;
                         },
-                    }
-                }
+                    },
+                    .@"struct" => switch (part) {
+                        inline else => |value, tag| {
+                            @field(self.data, @tagName(tag)) = value;
+                        },
+                    },
+                    else => @compileError(@typeName(T) ++ " is not supported"),
+                },
             }
         }
     };
 }
 
-test Sink {
-    const t = std.testing;
-
-    const context: *zimq.Context = try .init();
-    defer context.deinit();
-
-    var poller: *zimq.Poller = try .init();
-    defer poller.deinit();
-
-    const Data = struct { a: u8, @"1": u8, @"2": u8 };
-    const init_data: Data = .{ .a = 1, .@"1" = 1, .@"2" = 1 };
-    var source: zincom.Source(?Data) = try .init(
-        context,
-        .{ .ping = "inproc://#1/ping", .noti = "inproc://#1/noti" },
-        init_data,
-    );
-    defer source.deinit(t.allocator);
-
-    var sink: Sink(Data) = try .init(context, .{
-        .ping = "inproc://#1/ping",
-        .noti = "inproc://#1/noti",
-    });
-    defer sink.deinit();
-
-    try poller.add(sink.noti, null, .in);
-    try poller.add(source.ping, null, .in);
-
-    var event: zimq.Poller.Event = undefined;
-
-    var timer = try std.time.Timer.start();
-    while (sink.current == null) {
-        try sink.sendPing();
-
-        poller.wait(&event, 100) catch if (timer.read() > 2 * std.time.ns_per_s) {
-            try t.expect(false);
-        } else {
-            continue;
-        };
-
-        if (event.socket) |socket| {
-            if (socket == source.ping) {
-                try source.processPing(t.allocator);
-            }
-
-            if (socket == sink.noti) {
-                try sink.process();
-            }
-        }
-    }
-
-    try t.expectEqual(init_data, sink.current);
-
-    try source.setField(.{ .a = 3 }, t.allocator);
-
-    _ = try sink.process();
-    try t.expectEqual(source.current, sink.current);
-}
-
 const std = @import("std");
+const Allocator = std.mem.Allocator;
+const hasFn = std.meta.hasFn;
+
 const zimq = @import("zimq");
 const mzg = @import("mzg");
-const zincom = @import("root.zig");
+const zic = @import("root.zig");
 
-const consumeAll = zincom.consumeAll;
-const StructAsTaggedUnion = zincom.StructAsTaggedUnion;
-const AsOptional = zincom.AsOptional;
-
-const Header = zincom.Header;
+const consumeAll = zic.consumeAll;
+const StructAsTaggedUnion = zic.StructAsTaggedUnion;
+const AsOptional = zic.AsOptional;

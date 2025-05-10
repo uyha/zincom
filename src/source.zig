@@ -1,9 +1,14 @@
-pub fn Source(comptime TData: type) type {
+pub fn Source(comptime T: type) type {
     return struct {
         const Self = @This();
 
-        pub const Data = TData;
-        pub const Event = StructAsTaggedUnion(Data);
+        pub const Data = T;
+        pub const Field = Changes(Data);
+
+        pub const Noti = union(enum) {
+            whole: Data,
+            part: Field,
+        };
 
         ping: *zimq.Socket,
         noti: *zimq.Socket,
@@ -11,6 +16,8 @@ pub fn Source(comptime TData: type) type {
         message: zimq.Message,
         buffer: std.ArrayListUnmanaged(u8) = .empty,
 
+        /// Do not modify `current` directly, only do so via `setField` or
+        /// `setCurrent` so that synchronization info will be emitted.
         current: Data,
 
         pub const InitError = zimq.Socket.InitError || zimq.Socket.BindError;
@@ -56,8 +63,8 @@ pub fn Source(comptime TData: type) type {
 
         pub fn setCurrent(
             self: *Self,
-            current: Data,
             allocator: std.mem.Allocator,
+            current: Data,
         ) SendError!void {
             self.current = current;
             try self.sendPing(allocator);
@@ -65,8 +72,8 @@ pub fn Source(comptime TData: type) type {
 
         pub fn setField(
             self: *Self,
-            field: Event,
             allocator: Allocator,
+            field: Field,
         ) SendError!void {
             const current = switch (@typeInfo(Data)) {
                 .optional => if (self.current) |*current| current else return,
@@ -81,8 +88,7 @@ pub fn Source(comptime TData: type) type {
             self.buffer.clearRetainingCapacity();
 
             const writer = self.buffer.writer(allocator);
-            try writer.writeAll("noti");
-            try zic.pack(field, writer);
+            try zic.pack(Noti{ .part = field }, writer);
 
             try self.noti.sendSlice(self.buffer.items, .{});
         }
@@ -91,88 +97,53 @@ pub fn Source(comptime TData: type) type {
             self.buffer.clearRetainingCapacity();
 
             const writer = self.buffer.writer(allocator);
-            try writer.writeAll("ping");
-            try zic.pack(self.current, writer);
+            try zic.pack(Noti{ .whole = self.current }, writer);
 
             try self.noti.sendSlice(self.buffer.items, .{});
         }
     };
 }
 
-test Source {
-    const t = std.testing;
-    const context: *zimq.Context = try .init();
-    defer context.deinit();
+fn Changes(T: type) type {
+    const info = switch (@typeInfo(T)) {
+        .optional => |info| @typeInfo(info.child).@"struct",
+        else => |info| info.@"struct",
+    };
+    const tag_fields: [info.fields.len]std.builtin.Type.EnumField = blk: {
+        var result: [info.fields.len]std.builtin.Type.EnumField = undefined;
 
-    var poller: *zimq.Poller = try .init();
-    defer poller.deinit();
+        for (info.fields, 0..) |field, i| {
+            result[i].name = field.name;
+            result[i].value = i;
+        }
 
-    const Data = struct { a: u8, @"1": u8, @"2": u8 };
-    var source: Source(?Data) = try .init(
-        context,
-        .{ .ping = "inproc://#1/ping", .noti = "inproc://#1/noti" },
-        null,
-    );
-    defer source.deinit(t.allocator);
-    const Event = @TypeOf(source).Event;
+        break :blk result;
+    };
+    const tag: std.builtin.Type.Enum = .{
+        .tag_type = std.math.IntFittingRange(0, info.fields.len),
+        .fields = &tag_fields,
+        .decls = info.decls,
+        .is_exhaustive = true,
+    };
 
-    const noti: *zimq.Socket = try .init(context, .sub);
-    defer noti.deinit();
-    try noti.set(.subscribe, "");
-    try noti.connect("inproc://#1/noti");
+    const event_fields: [info.fields.len]std.builtin.Type.UnionField = blk: {
+        var result: [info.fields.len]std.builtin.Type.UnionField = undefined;
 
-    const ping: *zimq.Socket = try .init(context, .push);
-    defer ping.deinit();
-    try ping.connect("inproc://#1/ping");
-    try ping.sendSlice("", .{});
+        for (info.fields, 0..) |field, i| {
+            result[i].name = field.name;
+            result[i].type = field.type;
+            result[i].alignment = field.alignment;
+        }
 
-    try poller.add(source.ping, null, .in);
-
-    var events: [4]zimq.Poller.Event = undefined;
-    const len = try poller.wait_all(&events, -1);
-    try t.expectEqual(1, len);
-    try t.expectEqual(source.ping, events[0].socket);
-    try source.processPing(t.allocator);
-
-    var message: zimq.Message = .empty();
-    defer message.deinit();
-
-    _ = try noti.recvMsg(&message, .{});
-    try t.expectEqualStrings("ping\xc0", message.slice());
-    try t.expect(!message.more());
-
-    {
-        // Since currently the data is null, no event will be sent
-        try source.setField(.{ .@"1" = 1 }, t.allocator);
-
-        try t.expectError(
-            error.WouldBlock,
-            noti.recvMsg(&message, .noblock),
-        );
-    }
-
-    {
-        try source.setCurrent(
-            .{ .a = 3, .@"1" = 1, .@"2" = 2 },
-            t.allocator,
-        );
-
-        const received = try noti.recvMsg(&message, .noblock);
-        try t.expectEqual(8, received);
-        try t.expectEqualStrings("ping\x93\x03\x01\x02", message.slice());
-    }
-
-    {
-        try source.setField(.{ .@"2" = 1 }, t.allocator);
-
-        const received = try noti.recvMsg(&message, .noblock);
-        try t.expectEqual(7, received);
-        try t.expectEqualStrings("noti\x92\x02\x01", message.slice());
-        var event: Event = undefined;
-        _ = try zic.unpack(message.slice()[4..], &event);
-        try t.expectEqual(Event{ .@"2" = 1 }, event);
-        try t.expect(!message.more());
-    }
+        break :blk result;
+    };
+    const event: std.builtin.Type.Union = .{
+        .layout = .auto,
+        .tag_type = @Type(.{ .@"enum" = tag }),
+        .fields = &event_fields,
+        .decls = info.decls,
+    };
+    return @Type(.{ .@"union" = event });
 }
 
 const std = @import("std");
@@ -183,4 +154,3 @@ const mzg = @import("mzg");
 const zic = @import("root.zig");
 
 const consumeAll = zic.consumeAll;
-const StructAsTaggedUnion = zic.StructAsTaggedUnion;

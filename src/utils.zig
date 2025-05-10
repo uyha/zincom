@@ -37,55 +37,6 @@ test consumeAll {
     try consumeAll(pull);
 }
 
-pub fn StructAsTaggedUnion(Data: type) type {
-    const info = switch (@typeInfo(Data)) {
-        .optional => |info| @typeInfo(info.child).@"struct",
-        else => |info| info.@"struct",
-    };
-    const tag_fields: [info.fields.len]std.builtin.Type.EnumField = blk: {
-        var result: [info.fields.len]std.builtin.Type.EnumField = undefined;
-
-        for (info.fields, 0..) |field, i| {
-            result[i].name = field.name;
-            result[i].value = i;
-        }
-
-        break :blk result;
-    };
-    const tag: std.builtin.Type.Enum = .{
-        .tag_type = std.math.IntFittingRange(0, info.fields.len),
-        .fields = &tag_fields,
-        .decls = info.decls,
-        .is_exhaustive = true,
-    };
-
-    const event_fields: [info.fields.len]std.builtin.Type.UnionField = blk: {
-        var result: [info.fields.len]std.builtin.Type.UnionField = undefined;
-
-        for (info.fields, 0..) |field, i| {
-            result[i].name = field.name;
-            result[i].type = field.type;
-            result[i].alignment = field.alignment;
-        }
-
-        break :blk result;
-    };
-    const event: std.builtin.Type.Union = .{
-        .layout = .auto,
-        .tag_type = @Type(.{ .@"enum" = tag }),
-        .fields = &event_fields,
-        .decls = info.decls,
-    };
-    return @Type(.{ .@"union" = event });
-}
-
-pub fn AsOptional(Data: type) type {
-    return switch (@typeInfo(Data)) {
-        .optional => Data,
-        else => ?Data,
-    };
-}
-
 const std = @import("std");
 const t = std.testing;
 const zimq = @import("zimq");

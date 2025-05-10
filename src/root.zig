@@ -37,14 +37,12 @@ pub fn unpackAllocate(
 }
 
 pub const consumeAll = utils.consumeAll;
-pub const StructAsTaggedUnion = utils.StructAsTaggedUnion;
-pub const AsOptional = utils.AsOptional;
 
 const source = @import("source.zig");
 pub const Source = source.Source;
 
 const sink = @import("sink.zig");
-pub const Sink = source.Sink;
+pub const Sink = sink.Sink;
 
 pub const Head = @import("Head.zig");
 pub const Nerve = @import("Nerve.zig");
