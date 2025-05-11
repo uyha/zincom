@@ -38,11 +38,9 @@ pub fn unpackAllocate(
 
 pub const consumeAll = utils.consumeAll;
 
-const source = @import("source.zig");
-pub const Source = source.Source;
-
 const sink = @import("sink.zig");
 pub const Sink = sink.Sink;
+pub const Source = @import("Source.zig");
 
 pub const Head = @import("Head.zig");
 pub const Nerve = @import("Nerve.zig");
@@ -50,8 +48,8 @@ pub const Nerve = @import("Nerve.zig");
 comptime {
     const t = @import("std").testing;
 
-    t.refAllDecls(source);
     t.refAllDecls(sink);
+    t.refAllDecls(Source);
     t.refAllDecls(Head);
     t.refAllDecls(Nerve);
 }
