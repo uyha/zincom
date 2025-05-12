@@ -14,6 +14,36 @@ test "Head and Nerve join" {
     var nerve: zic.Nerve = try .init(context, "inproc://#1/head");
     defer nerve.deinit(allocator);
 
+    var watch: zic.Watch = try .init(context, .{
+        .ping = "inproc://#1/ping",
+        .noti = "inproc://#1/noti",
+    });
+    defer watch.deinit();
+
+    {
+        var i: u8 = 0;
+        while (i < 10) : (i += 1) {
+            sleep(5 * ns_per_ms);
+
+            try watch.sendPing();
+            try head.consumePing();
+            try head.broadcastMembers(allocator);
+
+            var result = watch.process(allocator);
+            if (result) |*noti| {
+                defer noti.deinit(allocator);
+
+                try t.expect(watch.connected);
+                for (head.members.keys(), noti.members.items) |expected, actual| {
+                    try t.expectEqualStrings(expected, actual);
+                }
+                break;
+            } else |_| {}
+        } else {
+            try t.expect(false);
+        }
+    }
+
     {
         try nerve.sendJoin(allocator, "test", 200, .initComptime(
             .{
@@ -24,6 +54,11 @@ test "Head and Nerve join" {
 
         const response = try nerve.getResponse(allocator);
         try t.expectEqual(Resp{ .join = .success }, response);
+
+        var noti = try watch.process(allocator);
+        defer noti.deinit(allocator);
+
+        try t.expectEqualStrings("test", noti.join);
     }
 
     {
@@ -36,6 +71,10 @@ test "Head and Nerve join" {
 
         const response = try nerve.getResponse(allocator);
         try t.expectEqual(Resp{ .join = .duplicate }, response);
+
+        if (watch.process(allocator)) |_| {} else |err| {
+            try t.expectEqual(error.WouldBlock, err);
+        }
     }
 }
 
@@ -52,6 +91,24 @@ test "Head and Nerve down" {
     });
     defer head.deinit(allocator);
 
+    var watch: zic.Watch = try .init(context, .{
+        .ping = "inproc://#1/ping",
+        .noti = "inproc://#1/noti",
+    });
+    defer watch.deinit();
+    {
+        var i: u8 = 0;
+        while (i < 10) : (i += 1) {
+            sleep(1 * ns_per_ms);
+
+            try head.broadcastMembers(allocator);
+            _ = watch.process(allocator) catch {};
+            if (watch.connected) break;
+        } else {
+            try t.expect(false);
+        }
+    }
+
     var nerve: zic.Nerve = try .init(context, "inproc://#1/head");
     defer nerve.deinit(allocator);
 
@@ -64,11 +121,23 @@ test "Head and Nerve down" {
     _ = try nerve.getResponse(allocator);
 
     {
+        var noti = try watch.process(allocator);
+        defer noti.deinit(allocator);
+
+        try t.expectEqualStrings("test", noti.join);
+    }
+
+    {
         try nerve.sendDown(allocator, "test");
         try head.processHead(allocator);
 
         const response = try nerve.getResponse(allocator);
         try t.expectEqual(Resp{ .down = .success }, response);
+
+        var noti = try watch.process(allocator);
+        defer noti.deinit(allocator);
+
+        try t.expectEqualStrings("test", noti.down);
     }
 
     {
@@ -156,16 +225,41 @@ test "Head and Nerve query" {
     });
     defer head.deinit(allocator);
 
+    var watch: zic.Watch = try .init(context, .{
+        .ping = "inproc://#1/ping",
+        .noti = "inproc://#1/noti",
+    });
+    defer watch.deinit();
+    {
+        var i: u8 = 0;
+        while (i < 10) : (i += 1) {
+            sleep(1 * ns_per_ms);
+
+            try head.broadcastMembers(allocator);
+            _ = watch.process(allocator) catch {};
+            if (watch.connected) break;
+        } else {
+            try t.expect(false);
+        }
+    }
+
     var nerve: zic.Nerve = try .init(context, "inproc://#1/head");
     defer nerve.deinit(allocator);
 
-    try nerve.sendJoin(allocator, "test", 10 * ns_per_ms, .initComptime(
-        .{
-            &.{ "hello", "inproc://#1/hello" },
-        },
-    ));
-    try head.processHead(allocator);
-    _ = try nerve.getResponse(allocator);
+    {
+        try nerve.sendJoin(allocator, "test", 10 * ns_per_ms, .initComptime(
+            .{
+                &.{ "hello", "inproc://#1/hello" },
+            },
+        ));
+        try head.processHead(allocator);
+        _ = try nerve.getResponse(allocator);
+
+        var noti = try watch.process(allocator);
+        defer noti.deinit(allocator);
+
+        try t.expectEqualStrings("test", noti.join);
+    }
 
     {
         sleep(5 * ns_per_ms);
@@ -184,12 +278,21 @@ test "Head and Nerve query" {
         sleep(11 * ns_per_ms);
         try head.checkMembers(allocator);
 
-        try nerve.sendQuery(allocator, "test");
-        try head.processHead(allocator);
+        {
+            try nerve.sendQuery(allocator, "test");
+            try head.processHead(allocator);
 
-        var actual = try nerve.getResponse(allocator);
-        defer actual.deinit(allocator);
-        try t.expectEqual(Resp{ .query = .absence }, actual);
+            var actual = try nerve.getResponse(allocator);
+            defer actual.deinit(allocator);
+            try t.expectEqual(Resp{ .query = .absence }, actual);
+        }
+
+        {
+            var noti = try watch.process(allocator);
+            defer noti.deinit(allocator);
+
+            try t.expectEqualStrings("test", noti.down);
+        }
     }
 }
 

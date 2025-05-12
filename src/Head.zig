@@ -45,7 +45,7 @@ pub fn deinit(self: *Head, allocator: Allocator) void {
     self.message.deinit();
 }
 
-pub const ProcessError = zimq.Socket.RecvMsgError || zimq.Socket.SendError || mzg.UnpackError || Allocator.Error || error{Unsupported};
+pub const ProcessError = zimq.Socket.RecvMsgError || zimq.Socket.SendError || mzg.UnpackError || Allocator.Error || BroadCastError || error{Unsupported};
 pub fn processHead(self: *Head, allocator: Allocator) ProcessError!void {
     _ = try self.head.recvMsg(&self.message, .{});
 
@@ -80,6 +80,7 @@ fn processJoin(
     errdefer member.deinit(allocator);
 
     try self.members.put(allocator, member.name, member);
+    try self.broadcastJoin(allocator, member.name);
 
     return Resp{ .join = .success };
 }
@@ -103,6 +104,7 @@ fn processDown(
 ) ProcessError!Resp {
     var entry = self.members.fetchSwapRemove(name);
     if (entry) |*kv| {
+        try self.broadcastDown(allocator, kv.value.name);
         kv.value.deinit(allocator);
         return Resp{ .down = .success };
     }
@@ -122,7 +124,7 @@ fn processQuery(
 
     return Resp{ .query = .absence };
 }
-pub const CheckError = error{Unsupported};
+pub const CheckError = BroadCastError || error{Unsupported};
 pub fn checkMembers(self: *Head, allocator: Allocator) CheckError!void {
     const now: Instant = try .now();
 
@@ -133,21 +135,50 @@ pub fn checkMembers(self: *Head, allocator: Allocator) CheckError!void {
             i += 1;
             continue;
         }
+
+        try self.broadcastDown(allocator, member.name);
         member.deinit(allocator);
         self.members.swapRemoveAt(i);
     }
 }
 
-pub const PingError = zimq.Socket.RecvMsgError || zimq.Socket.SendError || mzg.PackError(ArrayListUnmanaged(u8).Writer);
-pub fn processPing(self: *Head, allocator: Allocator) PingError!void {
-    try consumeAll(self.ping);
-
+pub const BroadCastError = zimq.Socket.SendError || mzg.PackError(ArrayListUnmanaged(u8).Writer);
+pub fn broadcastMembers(self: *Head, allocator: Allocator) BroadCastError!void {
     self.buffer.clearRetainingCapacity();
-    const writer = self.buffer.writer(allocator);
-    try zic.pack(self.members.keys(), writer);
 
-    try self.noti.sendConstSlice("ping", .more);
+    const writer = self.buffer.writer(allocator);
+    try zic.pack(Noti{ .members = .initBuffer(self.members.keys()) }, writer);
+
     try self.noti.sendSlice(self.buffer.items, .{});
+}
+
+fn broadcastJoin(
+    self: *Head,
+    allocator: Allocator,
+    name: []const u8,
+) BroadCastError!void {
+    self.buffer.clearRetainingCapacity();
+
+    const writer = self.buffer.writer(allocator);
+    try zic.pack(Noti{ .join = name }, writer);
+
+    try self.noti.sendSlice(self.buffer.items, .{});
+}
+fn broadcastDown(
+    self: *Head,
+    allocator: Allocator,
+    name: []const u8,
+) BroadCastError!void {
+    self.buffer.clearRetainingCapacity();
+
+    const writer = self.buffer.writer(allocator);
+    try zic.pack(Noti{ .down = name }, writer);
+
+    try self.noti.sendSlice(self.buffer.items, .{});
+}
+
+pub fn consumePing(self: *Head) zimq.Socket.RecvError!void {
+    try consumeAll(self.ping);
 }
 
 const Member = struct {
@@ -249,6 +280,19 @@ pub const Resp = union(enum) {
         switch (self.*) {
             .query => |*query| query.deinit(allocator),
             else => {},
+        }
+    }
+};
+
+pub const Noti = union(enum) {
+    members: ArrayListUnmanaged([]const u8),
+    join: []const u8,
+    down: []const u8,
+
+    pub fn deinit(self: *Noti, allocator: Allocator) void {
+        switch (self.*) {
+            .members => |*value| value.deinit(allocator),
+            .join, .down => {},
         }
     }
 };

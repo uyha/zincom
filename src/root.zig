@@ -6,6 +6,7 @@ const Allocator = std.mem.Allocator;
 const mzg = @import("mzg");
 
 const pack_map = .{
+    .{ std.ArrayListUnmanaged([]const u8), mzg.adapter.packArray },
     .{ std.ArrayListUnmanaged(u8), mzg.adapter.packArray },
     .{ std.StringArrayHashMapUnmanaged([]const u8), mzg.adapter.packMap },
     .{ std.StaticStringMap([]const u8), mzg.adapter.packMap },
@@ -18,6 +19,7 @@ pub fn pack(
 }
 
 const unpack_map = .{
+    .{ std.ArrayListUnmanaged([]const u8), mzg.adapter.unpackArray },
     .{ std.ArrayListUnmanaged(u8), mzg.adapter.unpackArray },
     .{ std.StringArrayHashMapUnmanaged([]const u8), mzg.adapter.unpackMap },
     .{ std.StaticStringMap([]const u8), mzg.adapter.unpackStaticStringMap },
@@ -43,6 +45,7 @@ pub const Sink = @import("Sink.zig");
 
 pub const Head = @import("Head.zig");
 pub const Nerve = @import("Nerve.zig");
+pub const Watch = @import("Watch.zig");
 
 comptime {
     const t = @import("std").testing;
