@@ -33,7 +33,7 @@ pub fn build(b: *std.Build) void {
     integration_tests.root_module.addImport("zic", lib.root_module);
     const run_integration_tests = b.addRunArtifact(integration_tests);
 
-    const test_step = b.step("test", "Run unit tests");
+    const test_step = b.step("zincom-test", "Run unit tests");
     test_step.dependOn(&run_lib_unit_tests.step);
     test_step.dependOn(&run_integration_tests.step);
 
