@@ -6,8 +6,7 @@ noti: *zimq.Socket,
 message: zimq.Message,
 buffer: std.ArrayListUnmanaged(u8) = .empty,
 
-pub const SendError = zimq.Socket.SendError || std.mem.Allocator.Error || mzg.PackError(std.ArrayListUnmanaged(u8).Writer);
-pub const PingError = SendError || zimq.Socket.RecvError;
+pub const BroadcastError = zimq.Socket.SendError || std.mem.Allocator.Error || mzg.PackError(std.ArrayListUnmanaged(u8).Writer);
 
 pub const Endpoints = struct {
     ping: [:0]const u8,
@@ -41,7 +40,7 @@ pub fn broadcastWhole(
     self: *Source,
     allocator: Allocator,
     whole: anytype,
-) SendError!void {
+) BroadcastError!void {
     self.buffer.clearRetainingCapacity();
 
     const writer = self.buffer.writer(allocator);
@@ -58,7 +57,7 @@ pub fn broadcastPart(
     allocator: std.mem.Allocator,
     whole: anytype,
     part: Tag(Part(@TypeOf(whole))),
-) SendError!void {
+) BroadcastError!void {
     const CurrentPart = @FieldType(Noti(@TypeOf(whole)), "part");
     self.buffer.clearRetainingCapacity();
 
@@ -79,17 +78,22 @@ pub fn broadcastPart(
     try self.noti.sendSlice(self.buffer.items, .{});
 }
 
-pub fn processPing(
-    self: *Source,
-    allocator: Allocator,
-    current: anytype,
-) PingError!void {
-    try consumeAll(self.ping);
-    try self.broadcastWhole(allocator, current);
+pub fn broadcastNil(self: *Source, allocator: Allocator) BroadcastError!void {
+    self.buffer.clearRetainingCapacity();
+    try zic.pack(Noti(void){ .nil = {} }, self.buffer.writer(allocator));
+    try self.noti.sendSlice(self.buffer.items, .{});
 }
 
-fn Part(T: type) type {
-    const info = @typeInfo(T).@"struct";
+pub fn consumePing(self: *Source) zimq.Socket.RecvError!void {
+    try consumeAll(self.ping);
+}
+
+pub fn Part(T: type) type {
+    const info = switch (@typeInfo(T)) {
+        .void => return void,
+        .@"struct" => |info| info,
+        else => @compileError(@typeName(T) ++ " is not supported"),
+    };
 
     const tag_fields: [info.fields.len]std.builtin.Type.EnumField = blk: {
         var result: [info.fields.len]std.builtin.Type.EnumField = undefined;
@@ -128,10 +132,11 @@ fn Part(T: type) type {
     return @Type(.{ .@"union" = event });
 }
 
-pub fn Noti(T: type) type {
+pub fn Noti(Whole: type) type {
     return union(enum) {
-        whole: T,
-        part: Part(T),
+        whole: Whole,
+        part: Part(Whole),
+        nil: void,
     };
 }
 
@@ -194,6 +199,15 @@ test Source {
 
         _ = try zic.unpack(message.slice(), &actual);
         try t.expectEqual(Part(Data){ .a = 10 }, actual.part);
+    }
+
+    {
+        try source.broadcastNil(allocator);
+        _ = try sink.recvMsg(&message, .{});
+        try t.expectEqualStrings("\x92\x02\xC0", message.slice());
+
+        _ = try zic.unpack(message.slice(), &actual);
+        try t.expectEqual({}, actual.nil);
     }
 }
 
