@@ -23,6 +23,7 @@ pub fn init(context: *zimq.Context, endpoints: Endpoints) InitError!Sink {
 
     try result.noti.set(.subscribe, "\x92\x00");
     try result.noti.set(.subscribe, "\x92\x01");
+    try result.noti.set(.subscribe, "\x92\x02");
 
     try result.ping.connect(endpoints.ping);
     try result.noti.connect(endpoints.noti);

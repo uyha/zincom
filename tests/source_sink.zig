@@ -42,6 +42,8 @@ test "source sink whole" {
             if (sink.connected) {
                 break;
             }
+        } else {
+            try t.expect(false);
         }
     }
 }
@@ -90,6 +92,8 @@ test "source sink part" {
             if (sink.connected) {
                 break;
             }
+        } else {
+            try t.expect(false);
         }
     }
 }
@@ -132,10 +136,8 @@ test "source sink nil" {
             } else |_| {
                 try t.expect(!sink.connected);
             }
-
-            if (sink.connected) {
-                break;
-            }
+        } else {
+            try t.expect(false);
         }
     }
 }
