@@ -45,7 +45,7 @@ pub fn deinit(self: *Head, allocator: Allocator) void {
     self.message.deinit();
 }
 
-pub const ProcessError = zimq.Socket.RecvMsgError || zimq.Socket.SendError || mzg.UnpackError || Allocator.Error || error{ HeaderInvalid, Unsupported };
+pub const ProcessError = zimq.Socket.RecvMsgError || zimq.Socket.SendError || mzg.UnpackError || Allocator.Error || error{Unsupported};
 pub fn processHead(self: *Head, allocator: Allocator) ProcessError!void {
     _ = try self.head.recvMsg(&self.message, .{});
 
